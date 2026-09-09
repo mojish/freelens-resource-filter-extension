@@ -1,39 +1,54 @@
 /**
  * MobX store holding the active filter rows for the Resource Filter page.
- * Plain observable state — evaluation lives in filter-engine.ts.
+ * Plain observable state — evaluation lives in filter-engine.ts,
+ * persistence lives in filter-storage.ts.
+ *
+ * Uses makeObservable annotations instead of decorators so the source compiles
+ * identically under tsc (type-check), oxc (build), and esbuild (vitest).
  */
 
 import { observable, action, computed, makeObservable } from "mobx";
 import { getRandomId } from "./id";
-import { matchesAllFilters, type FieldFilter, type FilterOperator } from "./filter-engine";
+import type { FieldFilter, FilterOperator } from "./filter-engine";
+import type { SerializedFilter } from "./filter-storage";
 
 export class FilterStore {
-  @observable filters: FieldFilter[] = [];
+  filters: FieldFilter[] = [];
 
-  @observable expanded = true;
-
-  constructor() {
-    makeObservable(this);
+  constructor(initial?: SerializedFilter[]) {
+    makeObservable(this, {
+      filters: observable,
+      activeFilters: computed,
+      hasFilters: computed,
+      serializable: computed,
+      addFilter: action,
+      updateFilter: action,
+      removeFilter: action,
+      clearFilters: action,
+      setFilters: action,
+    });
+    if (initial) {
+      this.filters = initial.map((filter) => ({ id: getRandomId(), ...filter }));
+    }
   }
 
-  @computed get activeFilters(): FieldFilter[] {
+  get activeFilters(): FieldFilter[] {
     return this.filters.filter(({ operator, value }) => operator === "exists" || operator === "!exists" || value !== "");
   }
 
-  @computed get hasFilters(): boolean {
+  get hasFilters(): boolean {
     return this.activeFilters.length > 0;
   }
 
-  matches(item: object): boolean {
-    return matchesAllFilters(item, this.activeFilters);
+  /** Plain-data copy for persistence. */
+  get serializable(): SerializedFilter[] {
+    return this.filters.map(({ field, operator, value }) => ({ field, operator, value }));
   }
 
-  @action
   addFilter(field = "", operator: FilterOperator = "=", value = ""): void {
     this.filters.push({ id: getRandomId(), field, operator, value });
   }
 
-  @action
   updateFilter(id: string, patch: Partial<Omit<FieldFilter, "id">>): void {
     const filter = this.filters.find((f) => f.id === id);
     if (filter) {
@@ -41,23 +56,16 @@ export class FilterStore {
     }
   }
 
-  @action
   removeFilter(id: string): void {
     this.filters = this.filters.filter((f) => f.id !== id);
   }
 
-  @action
   clearFilters(): void {
     this.filters = [];
   }
 
-  @action
-  toggleExpanded(): void {
-    this.expanded = !this.expanded;
-  }
-
-  @action
-  updateExpanded(expanded: boolean): void {
-    this.expanded = expanded;
+  /** Replace all rows (used when restoring persisted filters or loading a saved set). */
+  setFilters(filters: SerializedFilter[]): void {
+    this.filters = filters.map((filter) => ({ id: getRandomId(), ...filter }));
   }
 }
