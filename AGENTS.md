@@ -6,17 +6,19 @@ freelens-resource-filter-extension is a Freelens extension that renders its own 
 
 ## Commands
 
-The canonical command set — build, pack, install — lives in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Run `pnpm type:check && pnpm build` before considering a task complete.
+The canonical command set — build, test, pack, install — lives in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Run `pnpm verify` (type-check, build, test, pack) before considering a task complete.
 
 ## Conventions
 
-- Bump `version` in `package.json` for every code change that is deployed. Rebuild and repack before installing.
-- Mirror the build setup of `freelensapp/freelens-example-extension`. Host-provided modules stay external via `build/global-externals.js`.
+- Bump `version` in `package.json` and add a `CHANGELOG.md` entry for every deployed change. Rebuild and repack before installing.
+- Host-provided modules stay external via `build/global-externals.js`.
+- MobX state uses `makeObservable` annotation maps, never decorators (source must compile under tsc, oxc, and esbuild).
 
 ## Boundaries
 
 ### Always
-- Run `pnpm type:check` and `pnpm build` before finishing a change.
+- Run `pnpm verify` before finishing a change.
+- Add or update vitest tests with any change to `src/renderer/filtering/` logic.
 
 ### Ask first
 - Adding or removing npm dependencies.
@@ -40,3 +42,4 @@ The canonical command set — build, pack, install — lives in [docs/DEVELOPMEN
 - `update-installed.sh` refuses to run while Freelens is up. Quit the app first.
 - The renderer bundle is configured under the **`preload`** key in `electron.vite.config.js`, not `renderer`. The `renderer` key expects an HTML entry. Output must stay CommonJS with `preserveModules`, because Freelens loads `out/main/index.js` and `out/renderer/index.js` directly.
 - `apiManager.getStore(apiBase)` lazily creates a `CustomResourceStore` for CRDs. It is a side effect. Call it from an effect, never during render.
+- The render smoke test in `tests/` imports the built bundle — run `pnpm build` first, or it is skipped.

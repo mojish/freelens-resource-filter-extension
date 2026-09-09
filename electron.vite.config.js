@@ -10,6 +10,17 @@ import { globalExternals } from "./build/global-externals.js";
 // `rollupOptions.external` that electron-vite would otherwise apply.
 const runtimeExternals = ["electron", /^electron\//, ...builtinModules, ...builtinModules.map((m) => `node:${m}`)];
 
+// Host-provided modules resolved from globals at runtime — never bundled.
+const hostExternals = {
+  "@freelensapp/extensions": "global.LensExtensions",
+  mobx: "global.Mobx",
+  "mobx-react": "global.MobxReact",
+  react: "global.React",
+  "react-dom": "global.ReactDom",
+  "react-router-dom": "global.ReactRouterDom",
+  "react/jsx-runtime": "global.ReactJsxRuntime",
+};
+
 export default defineConfig({
   // main process has full access to Node.js APIs
   main: {
@@ -31,31 +42,7 @@ export default defineConfig({
       },
       sourcemap: true,
     },
-    oxc: {
-      decorator: {
-        legacy: true,
-        emitDecoratorMetadata: true,
-      },
-    },
-    plugins: [
-      react({
-        babel: {
-          plugins: [
-            [
-              "@babel/plugin-proposal-decorators",
-              {
-                version: "2023-05",
-              },
-            ],
-          ],
-        },
-      }),
-      globalExternals({
-        // the modules are provided by the host app as a global variable
-        "@freelensapp/extensions": "global.LensExtensions",
-        mobx: "global.Mobx",
-      }),
-    ],
+    plugins: [react(), globalExternals(hostExternals)],
   },
   // renderer process in Freelens can use Node.js modules then it is configured
   // with settings for preload script
@@ -79,35 +66,6 @@ export default defineConfig({
       },
       sourcemap: true,
     },
-    oxc: {
-      decorator: {
-        legacy: true,
-        emitDecoratorMetadata: true,
-      },
-    },
-    plugins: [
-      react({
-        babel: {
-          plugins: [
-            [
-              "@babel/plugin-proposal-decorators",
-              {
-                version: "2023-05",
-              },
-            ],
-          ],
-        },
-      }),
-      globalExternals({
-        // the modules are provided by the host app as a global variable
-        "@freelensapp/extensions": "global.LensExtensions",
-        mobx: "global.Mobx",
-        "mobx-react": "global.MobxReact",
-        react: "global.React",
-        "react-dom": "global.ReactDom",
-        "react-router-dom": "global.ReactRouterDom",
-        "react/jsx-runtime": "global.ReactJsxRuntime",
-      }),
-    ],
+    plugins: [react(), globalExternals(hostExternals)],
   },
 });

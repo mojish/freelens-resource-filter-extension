@@ -22,14 +22,14 @@ Generated files: `out/` comes from the build and `*.tgz` from `pnpm pack`. Never
 ```bash
 pnpm type:check     # tsc --noEmit against the @freelensapp/extensions typings
 pnpm build          # electron-vite build → out/main, out/renderer
-pnpm pack           # produces freelens-resource-filter-extension-<version>.tgz
+pnpm test           # pretest builds, then vitest: unit + render smoke tests
+pnpm verify         # type-check + build + test + pack (what CI runs)
 ```
 
-There is no automated test suite. The pure logic modules can be smoke-tested directly:
-
-```bash
-node -e "const fe = require('./out/renderer/filtering/filter-engine.js'); console.log(fe.matchesFilter({spec:{state:'pending'}}, {id:'x', field:'spec.state', operator:'=', value:'pending'}))"
-```
+Unit tests cover the filter engine (every operator, path syntax, matcher),
+field collector, persistence, and the MobX store. The render smoke test loads
+the built bundle with mocked host globals and renders the page. Run a single
+suite with `npx vitest run src/renderer/filtering/filter-engine.test.ts`.
 
 ## Install into Freelens
 
@@ -49,7 +49,7 @@ The script syncs `out/` and `package.json` into `~/.freelens/extensions/freelens
 
 ## Lint and format
 
-No linter is configured. Keep the existing style: TypeScript strict, double quotes, named imports.
+No linter is configured. Keep the existing style: TypeScript strict, double quotes, named imports. CI (GitHub Actions) runs `pnpm verify` on every push — see `.github/workflows/ci.yml`.
 
 ## Debugging
 
