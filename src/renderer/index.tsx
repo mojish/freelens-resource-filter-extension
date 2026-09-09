@@ -3,6 +3,7 @@
  */
 
 import { Renderer } from "@freelensapp/extensions";
+import { ErrorBoundary } from "./components/error-boundary";
 import { ResourceFilterPage } from "./components/resource-filter-page";
 
 export default class ResourceFilterRenderer extends Renderer.LensExtension {
@@ -10,7 +11,11 @@ export default class ResourceFilterRenderer extends Renderer.LensExtension {
     {
       id: "resource-filter",
       components: {
-        Page: () => <ResourceFilterPage />,
+        Page: () => (
+          <ErrorBoundary>
+            <ResourceFilterPage />
+          </ErrorBoundary>
+        ),
       },
     },
   ];

@@ -52,4 +52,28 @@ export const rowStyles = `
 .ResourceFilterPage .resource-picker {
   min-width: 360px;
 }
+.ResourceFilterPage .resource-filter-bar .resource-filter-set-name {
+  background: none;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 3px;
+  padding: 4px 8px;
+  color: currentColor;
+  min-width: 120px;
+}
+.ResourceFilterPage .resource-filter-bar .resource-filter-sets {
+  min-width: 160px;
+}
+.ResourceFilterPage .resource-filter-bar .resource-filter-sets-divider {
+  flex: 0 0 1px;
+  align-self: stretch;
+  background: rgba(128, 128, 128, 0.35);
+  margin: 0 4px;
+}
+.ResourceFilterPage .resource-filter-bar .resource-filter-row-stale .resource-filter-field {
+  border: 1px solid rgba(204, 102, 34, 0.8);
+  border-radius: 3px;
+}
+.ResourceFilterPage .resource-filter-bar .resource-filter-row-stale .resource-filter-stale-icon {
+  color: #cc6622;
+}
 `;
