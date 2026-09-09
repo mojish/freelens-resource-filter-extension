@@ -1,5 +1,7 @@
 # freelens-resource-filter-extension
 
+[![CI](https://github.com/mojish/freelens-resource-filter-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/mojish/freelens-resource-filter-extension/actions/workflows/ci.yml)
+
 A [Freelens](https://freelens.app) extension that adds generic field-based filtering to any Kubernetes resource list. Pick any kind in the cluster, including CRDs, and filter it with rows like `spec.state = pending AND metadata.namespace = digifyshop`. Freelens extensions cannot modify built-in resource pages. The extension therefore ships its own "Resource Filter" cluster page and controls the whole list layout there.
 
 Key mental model: the extension is a **separate page** in the cluster sidebar, directly below "Cluster". Built-in screens (Certificates, Pods, the CRD lists) stay untouched.
@@ -15,7 +17,13 @@ Key mental model: the extension is a **separate page** in the cluster sidebar, d
 
 ## Installation
 
-Install from the Extensions page (`Ctrl+Shift+E`) by name after the first npm release, or drag the packed `*.tgz` into the window. Build commands live in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Requires Freelens 1.10 or newer. In Freelens, open Extensions (`Ctrl+Shift+E`), search for `freelens-resource-filter-extension`, and install. Or open this deep link in a browser:
+
+```
+freelens://app/extensions/install/freelens-resource-filter-extension
+```
+
+Until the first npm release is out, build from source with `pnpm pack` and drag the `*.tgz` into the Extensions page. Build commands live in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Documentation
 

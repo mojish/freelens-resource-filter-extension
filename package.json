@@ -5,6 +5,14 @@
   "author": {
     "name": "Sotoon Delivery"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mojish/freelens-resource-filter-extension.git"
+  },
+  "homepage": "https://github.com/mojish/freelens-resource-filter-extension#readme",
+  "bugs": {
+    "url": "https://github.com/mojish/freelens-resource-filter-extension/issues"
+  },
   "main": "out/main/index.js",
   "renderer": "out/renderer/index.js",
   "files": [
