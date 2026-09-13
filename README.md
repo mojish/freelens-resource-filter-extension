@@ -34,5 +34,3 @@ Until the first npm release is out, build from source with `pnpm pack` and drag 
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Build, test, install, debug how-tos |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [AGENTS.md](AGENTS.md) | Instructions for AI coding agents |
-
-Decisions and their rationale live in the `delivery/madr` repository.
