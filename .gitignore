@@ -3,3 +3,5 @@ out/
 *.tgz
 *.log
 .DS_Store
+json/
+.vitest/
