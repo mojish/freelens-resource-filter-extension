@@ -1,27 +1,39 @@
 /**
  * Filter engine: field-path resolution + operator semantics.
  *
- * Filters are expressed as `{ field, operator, value }` where `field` is a
- * dotted path into the Kubernetes object, e.g.:
+ * Filters are `{ field, operator, value, combinator? }` where `field` is a
+ * dotted path into the Kubernetes object.
  *
- *   - `metadata.namespace`
- *   - `spec.state`
- *   - `status.conditions[*].type`   (any array element matches)
- *   - `status.conditions[0].type`   (specific index)
- *
- * All active filters are ANDed. Rows with an empty field or an empty value
- * (for value operators) are disabled and match everything.
+ * Combinators: consecutive `or` rows form a group; groups are ANDed.
+ * Empty field / empty value (for value operators) disables a row.
  */
 
-export const filterOperators = ["=", "!=", "contains", "!contains", "regex", "in", "exists", "!exists"] as const;
+import { parseRelativeDurationMs } from "./time-value";
+
+export const filterOperators = [
+  "=",
+  "!=",
+  "contains",
+  "!contains",
+  "regex",
+  "in",
+  "exists",
+  "!exists",
+  "older_than",
+  "newer_than",
+] as const;
 
 export type FilterOperator = (typeof filterOperators)[number];
+
+export type FilterCombinator = "and" | "or";
 
 export interface FieldFilter {
   id: string;
   field: string;
   operator: FilterOperator;
   value: string;
+  /** How this row combines with the previous one. Ignored on the first active row. */
+  combinator?: FilterCombinator;
 }
 
 /** Values longer than this are truncated before regex matching to bound the cost. */
@@ -43,6 +55,8 @@ export function getFieldValues(item: object, path: string): unknown[] {
       if (segment.kind === "any-index") {
         if (Array.isArray(node)) {
           next.push(...node);
+        } else {
+          next.push(...Object.values(node as Record<string, unknown>));
         }
         continue;
       }
@@ -63,15 +77,15 @@ export function getFieldValues(item: object, path: string): unknown[] {
   return current;
 }
 
-type PathSegment = { kind: "name"; name: string } | { kind: "index"; index: number } | { kind: "any-index" };
+export type PathSegment = { kind: "name"; name: string } | { kind: "index"; index: number } | { kind: "any-index" };
 
-function parsePath(path: string): PathSegment[] {
+/** Parse a dotted field path into name / index / any-index segments. */
+export function parsePath(path: string): PathSegment[] {
   return path
     .split(".")
     .filter((part) => part.length > 0)
     .flatMap((part) => {
       const segments: PathSegment[] = [];
-      // split `name[0]`, `name[*]`, `name` — also tolerate `name[]`
       const base = part.replace(/\[.*?\]/g, (bracket) => {
         const inner = bracket.slice(1, -1).trim();
         if (inner === "*" || inner === "") {
@@ -89,7 +103,6 @@ function parsePath(path: string): PathSegment[] {
     });
 }
 
-/** Normalize a value for comparison; returns undefined when it doesn't exist. */
 function normalize(value: unknown): string | number | boolean | null | undefined {
   if (value === undefined) {
     return undefined;
@@ -103,7 +116,6 @@ function normalize(value: unknown): string | number | boolean | null | undefined
   return JSON.stringify(value);
 }
 
-/** Parse a comma-separated `in` value list into a lowercase set. */
 function parseInList(value: string): Set<string> {
   return new Set(
     value
@@ -115,18 +127,20 @@ function parseInList(value: string): Set<string> {
 
 interface CompiledFilter {
   filter: FieldFilter;
-  /** Precompiled regex for the `regex` operator; null when unused or invalid. */
   regex: RegExp | null;
-  /** Precompiled lowercase set for the `in` operator. */
   inList: Set<string> | null;
+  durationMs: number | null;
 }
 
-/** Compile once per filter — never per item. Invalid regexes compile to null and never match. */
 function compileFilter(filter: FieldFilter): CompiledFilter {
   return {
     filter,
     regex: filter.operator === "regex" ? tryCompileRegex(filter.value) : null,
     inList: filter.operator === "in" ? parseInList(filter.value) : null,
+    durationMs:
+      filter.operator === "older_than" || filter.operator === "newer_than"
+        ? parseRelativeDurationMs(filter.value)
+        : null,
   };
 }
 
@@ -162,6 +176,18 @@ function valuesMatch(compiled: CompiledFilter, actual: string | number | boolean
       return compiled.regex !== null && compiled.regex.test(actualStr.slice(0, MAX_REGEX_TEST_LENGTH));
     case "in":
       return compiled.inList !== null && compiled.inList.size > 0 && compiled.inList.has(actualStr.toLowerCase());
+    case "older_than":
+    case "newer_than": {
+      if (compiled.durationMs == null) {
+        return false;
+      }
+      const ts = Date.parse(actualStr);
+      if (Number.isNaN(ts)) {
+        return false;
+      }
+      const age = Date.now() - ts;
+      return filter.operator === "older_than" ? age >= compiled.durationMs : age <= compiled.durationMs;
+    }
     default:
       return false;
   }
@@ -171,7 +197,6 @@ function matchesCompiled(item: object, compiled: CompiledFilter): boolean {
   const { filter } = compiled;
 
   if (filter.field === "") {
-    // a row without a field is disabled
     return true;
   }
 
@@ -188,30 +213,39 @@ function matchesCompiled(item: object, compiled: CompiledFilter): boolean {
       break;
   }
 
-  if (filter.value === "" || (filter.operator === "in" && (compiled.inList?.size ?? 0) === 0)) {
-    // empty value disables the filter (treated as "match everything")
+  if (
+    filter.value === "" ||
+    (filter.operator === "in" && (compiled.inList?.size ?? 0) === 0) ||
+    ((filter.operator === "older_than" || filter.operator === "newer_than") && compiled.durationMs == null)
+  ) {
     return true;
   }
 
   return normalized.some((v) => v !== undefined && v !== null && valuesMatch(compiled, v));
 }
 
-/** Does a single filter match one item? Convenience wrapper — compiles per call. */
+/** Group filters: consecutive `or` rows share a group; groups are ANDed. */
+export function groupFiltersByCombinator(filters: FieldFilter[]): FieldFilter[][] {
+  const groups: FieldFilter[][] = [];
+  for (const filter of filters) {
+    if (groups.length === 0 || (filter.combinator ?? "and") !== "or") {
+      groups.push([filter]);
+    } else {
+      groups[groups.length - 1].push(filter);
+    }
+  }
+  return groups;
+}
+
 export function matchesFilter(item: object, filter: FieldFilter): boolean {
   return matchesCompiled(item, compileFilter(filter));
 }
 
-/** AND all filters. Empty value filters are pass-through. */
 export function matchesAllFilters(item: object, filters: FieldFilter[]): boolean {
-  const compiled = filters.map(compileFilter);
-  return compiled.every((c) => matchesCompiled(item, c));
+  return createFilterMatcher(filters)(item);
 }
 
-/**
- * Build a matcher that compiles each filter once (regex, in-lists) and matches
- * many items against the same set. Use this on hot paths like list filtering.
- */
 export function createFilterMatcher(filters: FieldFilter[]): (item: object) => boolean {
-  const compiled = filters.map(compileFilter);
-  return (item: object) => compiled.every((c) => matchesCompiled(item, c));
+  const groups = groupFiltersByCombinator(filters).map((group) => group.map(compileFilter));
+  return (item: object) => groups.every((group) => group.some((compiled) => matchesCompiled(item, compiled)));
 }

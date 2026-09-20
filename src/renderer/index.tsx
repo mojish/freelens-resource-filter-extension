@@ -3,10 +3,18 @@
  */
 
 import { Renderer } from "@freelensapp/extensions";
+import { UiPrefsStore } from "../common/ui-prefs-store";
 import { ErrorBoundary } from "./components/error-boundary";
 import { ResourceFilterPage } from "./components/resource-filter-page";
+import { hydrateUiPrefsFromStore } from "./filtering/filter-storage";
 
 export default class ResourceFilterRenderer extends Renderer.LensExtension {
+  async onActivate() {
+    const store = UiPrefsStore.getInstanceOrCreate() as UiPrefsStore;
+    store.loadExtension(this);
+    hydrateUiPrefsFromStore(store);
+  }
+
   clusterPages = [
     {
       id: "resource-filter",

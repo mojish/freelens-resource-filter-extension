@@ -2,28 +2,31 @@
 
 [![CI](https://github.com/mojish/freelens-resource-filter-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/mojish/freelens-resource-filter-extension/actions/workflows/ci.yml)
 
-A [Freelens](https://freelens.app) extension that adds generic field-based filtering to any Kubernetes resource list. Pick any kind in the cluster, including CRDs, and filter it with rows like `spec.state = pending AND metadata.namespace = digifyshop`. Freelens extensions cannot modify built-in resource pages. The extension therefore ships its own "Resource Filter" cluster page and controls the whole list layout there.
+A [Freelens](https://freelens.app) extension that adds generic field-based filtering to any Kubernetes resource list. Pick any kind in the cluster, including CRDs, and filter with rows like `spec.state = pending OR spec.state = ready`. Freelens extensions cannot modify built-in resource pages, so this extension ships its own **Resource Filter** cluster page.
 
-Key mental model: the extension is a **separate page** in the cluster sidebar, directly below "Cluster". Built-in screens (Certificates, Pods, the CRD lists) stay untouched.
+Key mental model: a **separate page** in the cluster sidebar, directly below "Cluster". Built-in screens stay untouched.
 
 ## Features
 
-- Any resource kind, built-in or CRD, discovered live from the cluster
-- Field/operator/value rows: `=`, `!=`, `contains`, `!contains`, `regex`, `in`, `exists`, `!exists` — ANDed
-- Field paths walked from live objects, with value suggestions (`status.conditions[*].type` supported)
-- Table columns derived from the data: the most common `spec`/`status` fields become sortable columns
-- Filters persist per kind; named filter sets can be saved and reloaded
-- Rows whose field is missing from the current kind are marked and skipped
+- Any resource kind (built-in or CRD), discovered live from the cluster
+- Field / operator / value rows with AND/OR groups; operators include `=`, `!=`, `contains`, `regex`, `in`, `exists`, `older than` / `newer than`
+- Query bar that compiles into rows; `/` focuses it
+- Field paths from live objects; multi-word field search; value suggestions from peer-filtered items
+- Freelens namespace scope applied to the table, match counts, download, and kubectl `-n` / `-A`
+- Collapsible live `kubectl|yq` or `kubectl|jq` preview (`jq` uses `-o json`); copy command; download matches (output fields + namespace)
+- Output-field chips; user-pinned table columns; saved filter sets (include output/columns)
+- Kind favorites ★ and recent ↻; click a name to peek object JSON
+- Filters, sets, and UI prefs persist per cluster frame (localStorage)
 
 ## Installation
 
-Requires Freelens 1.10 or newer. In Freelens, open Extensions (`Ctrl+Shift+E`), search for `freelens-resource-filter-extension`, and install. Or open this deep link in a browser:
+Requires Freelens 1.10 or newer. In Freelens, open Extensions (`Ctrl+Shift+E`), search for `freelens-resource-filter-extension`, and install. Or open:
 
 ```
 freelens://app/extensions/install/freelens-resource-filter-extension
 ```
 
-Until the first npm release is out, build from source with `pnpm pack` and drag the `*.tgz` into the Extensions page. Build commands live in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Until the first npm release is out, build from source (`pnpm pack`) or sync a local install with `./update-installed.sh` (Freelens must be quit). Details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Documentation
 

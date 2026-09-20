@@ -31,6 +31,36 @@ beforeAll(() => {
 
   vi.stubGlobal("LensExtensions", {
     Main: { LensExtension: class LensExtension {} },
+    Common: {
+      Store: {
+        ExtensionStore: class ExtensionStore {
+          static instances = new Map();
+          static getInstanceOrCreate() {
+            const existing = this.instances.get(this);
+            if (existing) {
+              return existing;
+            }
+            const created = new this();
+            this.instances.set(this, created);
+            return created;
+          }
+          static getInstance() {
+            return this.instances.get(this);
+          }
+          static createInstance() {
+            return this.getInstanceOrCreate();
+          }
+          static resetInstance() {
+            this.instances.delete(this);
+          }
+          loadExtension() {}
+          fromStore(_data: unknown) {}
+          toJSON() {
+            return {};
+          }
+        },
+      },
+    },
     Renderer: {
       LensExtension: class LensExtension {},
       Component: new Proxy(

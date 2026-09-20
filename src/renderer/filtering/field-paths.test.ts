@@ -30,6 +30,24 @@ describe("collectFieldPaths", () => {
     expect(paths.some((p) => p.includes(".[*]"))).toBe(false);
   });
 
+  it("collects key-agnostic paths for maps of arrays", () => {
+    const catalog = collectFieldPaths([
+      {
+        spec: {
+          records: {
+            "@": [{ type: "A" }],
+            sapi: [{ type: "AAAA" }],
+          },
+        },
+      },
+    ]);
+    const paths = fieldPathsOf(catalog);
+    expect(paths).toContain("spec");
+    expect(paths).toContain("spec.records");
+    expect(paths).toContain("spec.records[*][*].type");
+    expect(valueSuggestionsFor(catalog, "spec.records[*][*].type")).toEqual(["A", "AAAA"]);
+  });
+
   it("records distinct values per path", () => {
     const catalog = collectFieldPaths(items);
     expect(valueSuggestionsFor(catalog, "metadata.namespace")).toEqual(["a", "b"]);

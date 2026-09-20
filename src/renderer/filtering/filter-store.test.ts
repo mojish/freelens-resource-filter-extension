@@ -33,7 +33,7 @@ describe("FilterStore", () => {
   it("serializes to plain data", () => {
     const store = new FilterStore();
     store.addFilter("spec.state", "in", "a, b");
-    expect(store.serializable).toEqual([{ field: "spec.state", operator: "in", value: "a, b" }]);
+    expect(store.serializable).toEqual([{ field: "spec.state", operator: "in", value: "a, b", combinator: "and" }]);
   });
 
   it("restores from serialized data with fresh ids", () => {

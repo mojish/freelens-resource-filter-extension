@@ -8,7 +8,7 @@ import {
 } from "./filter-engine";
 
 const challenge = {
-  metadata: { namespace: "digifyshop", name: "ch-1" },
+  metadata: { namespace: "ns-a", name: "ch-1" },
   spec: { state: "pending", tags: ["x", "y"], replicas: 2, enabled: true },
   status: { phase: "Ready", conditions: [{ type: "Ready", status: "True" }, { type: "Valid", status: "False" }] },
 };
@@ -41,6 +41,19 @@ describe("getFieldValues", () => {
   it("tolerates the dotted bracket form a.b.[*].c", () => {
     expect(getFieldValues(challenge, "status.conditions.[*].type")).toEqual(["Ready", "Valid"]);
   });
+
+  it("fans out map/object values with [*]", () => {
+    const zone = {
+      spec: {
+        records: {
+          "@": [{ type: "A" }, { type: "TXT" }],
+          sapi: [{ type: "AAAA" }],
+        },
+      },
+    };
+    expect(getFieldValues(zone, "spec.records[*][*].type")).toEqual(["A", "TXT", "AAAA"]);
+    expect(getFieldValues(zone, "spec.records.@[*].type")).toEqual(["A", "TXT"]);
+  });
 });
 
 describe("operators", () => {
@@ -68,14 +81,34 @@ describe("operators", () => {
   });
 
   it("contains is substring, case-insensitive", () => {
-    expect(filter("metadata.namespace", "contains", "DIGIFY")).toBe(true);
-    expect(filter("metadata.namespace", "contains", "shop")).toBe(true);
-    expect(filter("metadata.namespace", "!contains", "shop")).toBe(false);
+    expect(filter("metadata.namespace", "contains", "NS-A")).toBe(true);
+    expect(filter("metadata.namespace", "contains", "ns")).toBe(true);
+    expect(filter("metadata.namespace", "!contains", "ns")).toBe(false);
   });
 
   it("regex matches any array element", () => {
     expect(filter("status.conditions[*].type", "regex", "^Ready$")).toBe(true);
     expect(filter("status.conditions[*].type", "regex", "^Missing$")).toBe(false);
+  });
+
+  it("= matches across map keys via [*]", () => {
+    const zone = {
+      spec: {
+        records: {
+          "@": [{ type: "A" }],
+          sapi: [{ type: "AAAA" }],
+        },
+      },
+    };
+    expect(
+      matchesFilter(zone, { id: "t", field: "spec.records[*][*].type", operator: "=", value: "AAAA" }),
+    ).toBe(true);
+    expect(
+      matchesFilter(zone, { id: "t", field: "spec.records[*][*].type", operator: "=", value: "CNAME" }),
+    ).toBe(false);
+    expect(
+      matchesFilter(zone, { id: "t", field: "spec.records.@[*].type", operator: "=", value: "AAAA" }),
+    ).toBe(false);
   });
 
   it("regex never throws on invalid patterns", () => {
@@ -123,7 +156,7 @@ describe("row disabling", () => {
 describe("matchesAllFilters", () => {
   const rows = [
     { id: "a", field: "spec.state", operator: "=" as const, value: "pending" },
-    { id: "b", field: "metadata.namespace", operator: "=" as const, value: "digifyshop" },
+    { id: "b", field: "metadata.namespace", operator: "=" as const, value: "ns-a" },
   ];
 
   it("ANDs all rows", () => {
@@ -143,7 +176,18 @@ describe("matchesAllFilters", () => {
 
 describe("operator list", () => {
   it("exposes the full ordered operator list", () => {
-    expect(filterOperators).toEqual(["=", "!=", "contains", "!contains", "regex", "in", "exists", "!exists"]);
+    expect(filterOperators).toEqual([
+      "=",
+      "!=",
+      "contains",
+      "!contains",
+      "regex",
+      "in",
+      "exists",
+      "!exists",
+      "older_than",
+      "newer_than",
+    ]);
   });
 });
 

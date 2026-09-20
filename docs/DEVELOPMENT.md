@@ -26,10 +26,12 @@ pnpm test           # pretest builds, then vitest: unit + render smoke tests
 pnpm verify         # type-check + build + test + pack (what CI runs)
 ```
 
-Unit tests cover the filter engine (every operator, path syntax, matcher),
-field collector, persistence, and the MobX store. The render smoke test loads
-the built bundle with mocked host globals and renders the page. Run a single
-suite with `npx vitest run src/renderer/filtering/filter-engine.test.ts`.
+Unit tests cover the filter engine (every operator, path syntax, OR groups, matcher),
+field collector / search, kubectl|yq|jq export, namespace scope, persistence (including
+ui-prefs), and the MobX store. Feature/regression suites live under
+`src/renderer/filtering/*test.ts`. The render smoke test loads the built bundle with
+mocked host globals. Run a single suite with
+`pnpm exec vitest run src/renderer/filtering/filter-engine.test.ts`.
 
 ## Install into Freelens
 

@@ -43,3 +43,7 @@ The canonical command set — build, test, pack, install — lives in [docs/DEVE
 - The renderer bundle is configured under the **`preload`** key in `electron.vite.config.js`, not `renderer`. The `renderer` key expects an HTML entry. Output must stay CommonJS with `preserveModules`, because Freelens loads `out/main/index.js` and `out/renderer/index.js` directly.
 - `apiManager.getStore(apiBase)` lazily creates a `CustomResourceStore` for CRDs. It is a side effect. Call it from an effect, never during render.
 - The render smoke test in `tests/` imports the built bundle — run `pnpm build` first, or it is skipped.
+- Filtering/export code must stay kind-agnostic (no hard-coded CRD or product names in logic or test fixtures meant as product examples).
+- Freelens Select hardcodes `filterOption`; custom field search must use our own combobox (`filter-bar.tsx` + `field-path-search.ts`). Prefer a native `<select>` for operators that Freelens Select would substring-confuse (`older_than` / `newer_than`).
+- jq cannot parse YAML — the jq dialect must emit `kubectl -o json`.
+- localStorage is per cluster frame origin; favorites/filters live under `frf:v1:*` (see `filter-storage.ts`).

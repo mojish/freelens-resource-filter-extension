@@ -8,7 +8,8 @@
 const MAX_PATHS = 500;
 const MAX_VALUE_SUGGESTIONS = 100;
 const MAX_ARRAY_DEPTH = 3;
-const SAMPLE_SIZE = 200;
+/** Max items walked when building the field catalog (exported for UI banners). */
+export const SAMPLE_SIZE = 200;
 
 /** Collected field metadata for one resource kind. */
 export interface FieldCatalog {
@@ -74,7 +75,9 @@ function walk(node: unknown, prefix: string[], ctx: WalkContext, itemIndex: numb
     return;
   }
 
-  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+  const entries = Object.entries(node as Record<string, unknown>);
+
+  for (const [key, value] of entries) {
     const path = [...prefix, key].join(".");
 
     if (value == null || typeof value !== "object") {
@@ -85,8 +88,33 @@ function walk(node: unknown, prefix: string[], ctx: WalkContext, itemIndex: numb
       continue;
     }
 
-    if (ctx.valuesByPath.has(path) || ctx.valuesByPath.size < MAX_PATHS) {
+    if (Array.isArray(value)) {
+      if (ctx.valuesByPath.has(path) || ctx.valuesByPath.size < MAX_PATHS) {
+        walk(value, [...prefix, key], ctx, itemIndex, depth);
+      }
+      continue;
+    }
+
+    // Plain object / map: expose the container itself (e.g. `spec`, `spec.records`)
+    // so searches and kubectl projections can target it, not only leaf scalars.
+    ensurePath(ctx.valuesByPath, path);
+    markPresence(ctx, path, itemIndex);
+    if (ctx.valuesByPath.size < MAX_PATHS) {
       walk(value, [...prefix, key], ctx, itemIndex, depth);
+    }
+  }
+
+  // Map-of-arrays (e.g. DNS record maps under a key): also collect under `prefix[*]`
+  // so the field dropdown offers a key-agnostic path. Scalar maps keep named keys only.
+  if (prefix.length > 0 && ctx.valuesByPath.size < MAX_PATHS) {
+    const arrayValues = entries.filter(([, value]) => Array.isArray(value)).map(([, value]) => value);
+    if (arrayValues.length > 0) {
+      const starPrefix = [...prefix.slice(0, -1), `${prefix[prefix.length - 1]}[*]`];
+      for (const value of arrayValues) {
+        if (ctx.valuesByPath.size < MAX_PATHS) {
+          walk(value, starPrefix, ctx, itemIndex, depth);
+        }
+      }
     }
   }
 }
@@ -107,6 +135,14 @@ function recordValue(valuesByPath: Map<string, Set<string>>, path: string, value
   if (set.size < MAX_VALUE_SUGGESTIONS) {
     set.add(String(value));
   }
+}
+
+/** Ensure a non-scalar path exists in the catalog (empty suggestion set is fine). */
+function ensurePath(valuesByPath: Map<string, Set<string>>, path: string): void {
+  if (valuesByPath.has(path) || valuesByPath.size >= MAX_PATHS) {
+    return;
+  }
+  valuesByPath.set(path, new Set());
 }
 
 /** Count a path as present for one item, at most once per (item, path). */
