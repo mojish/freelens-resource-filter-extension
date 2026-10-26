@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.4.0] — 2026-10-26
+
+### Added
+- YAML downloads in yq mode (`.yaml`, `application/yaml`); jq mode retains JSON. The bundled `yaml` serializer preserves the same projected resource list and value types in both formats.
+
+### Fixed
+- Resource kind menu keeps its scroll position during namespace polling and unrelated page updates.
+- yq filters exclude null/missing values from value comparisons, treat empty strings as absent for existence checks, and evaluate wildcard `!exists` across the whole path.
+- yq and jq use optional traversal at every path segment: mixed arrays/maps no longer crash yq or abort jq before valid sibling branches. This also applies to output-field projections.
+- Query parsing preserves valueless existence checks, quoted AND/OR, and escaped strings; invalid queries are rejected atomically and empty queries clear rows.
+- Fields missing from the sampled catalog remain active, keeping table/count/download filtering consistent.
+- Same-length resource watch updates refresh counts and field/value suggestions.
+- JSON-quoted map keys support labels/annotations containing dots, slashes, spaces, quotes, and brackets across filtering, discovery, projections, and commands.
+- Exported equality handles literal asterisks, numeric coercion, boolean whitespace, and missing/null fields consistently with the UI. Age comparisons use RFC3339 instants, offsets, and millisecond precision with inclusive boundaries.
+- Overflowing durations cannot crash command preview; inactive rows retain the same OR behavior in commands and the UI.
+- Automatic columns select scalar values rather than empty object containers.
+- Favorites and preview preferences migrate from localStorage once; stale frames and legacy keys no longer restore removed favorites or a closed preview after migration.
+- Kind changes mount the host list with the correct store, reset kind-specific controls, and close the previous object peek. Pinned columns use unique sorting IDs and show JSON for objects.
+- Relative-time matches, counts, suggestions and preview refresh every second, using a shared time snapshot for the table, count and preview.
+- Multi-field command projections aggregate wildcard values instead of multiplying or dropping rows. Literal map keys containing `*` / `?` no longer glob in yq; projected `__proto__` keys are preserved.
+- Commands request the selected API version, normalize object comparisons as JSON, reject invalid regex syntax consistently, and share the UI's 10,000-code-point regex input limit.
+- Saved filters reject unknown operators and respect the row limit. Timestamp validation rejects out-of-range timezone offsets.
+- The local updater detects Freelens by process name, rejects incomplete builds before copying, and handles quoted installation paths.
+
+### Changed
+- Clarify that favorites belong to Resource Filter and are separate from Freelens sidebar favorites.
+- Show a yq regex compatibility hint; lookahead, lookbehind, and backreferences require the jq command dialect.
+- Add executable yq/jq regression cases and download tests; report unavailable command-line integration cases as skipped.
+
 ## [0.3.3] — 2026-09-20
 
 ### Fixed

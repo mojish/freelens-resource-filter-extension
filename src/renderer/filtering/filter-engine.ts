@@ -8,7 +8,7 @@
  * Empty field / empty value (for value operators) disables a row.
  */
 
-import { parseRelativeDurationMs } from "./time-value";
+import { parseRelativeDurationMs, parseTimestampMs } from "./time-value";
 
 export const filterOperators = [
   "=",
@@ -36,12 +36,13 @@ export interface FieldFilter {
   combinator?: FilterCombinator;
 }
 
-/** Values longer than this are truncated before regex matching to bound the cost. */
-const MAX_REGEX_TEST_LENGTH = 10_000;
+/** Bound regex input size consistently across UI, yq and jq (Unicode code points). */
+export const MAX_REGEX_TEST_LENGTH = 10_000;
 
 /** Get the values at `path` inside `item`. Arrays fan out over `[*]` or `[i]`. */
 export function getFieldValues(item: object, path: string): unknown[] {
   const segments = parsePath(path);
+  if (path.trim() !== "" && segments.length === 0) return [];
   let current: unknown[] = [item];
 
   for (const segment of segments) {
@@ -68,7 +69,10 @@ export function getFieldValues(item: object, path: string): unknown[] {
         continue;
       }
 
-      next.push((node as Record<string, unknown>)[(segment as { name: string }).name]);
+      if (segment.kind === "name") {
+        next.push(Object.prototype.hasOwnProperty.call(node, segment.name)
+          ? (node as Record<string, unknown>)[segment.name] : undefined);
+      }
     }
 
     current = next;
@@ -79,28 +83,52 @@ export function getFieldValues(item: object, path: string): unknown[] {
 
 export type PathSegment = { kind: "name"; name: string } | { kind: "index"; index: number } | { kind: "any-index" };
 
-/** Parse a dotted field path into name / index / any-index segments. */
+/** Parse dotted names, JSON-quoted map keys, array indexes, and wildcards. Invalid paths fail closed. */
 export function parsePath(path: string): PathSegment[] {
-  return path
-    .split(".")
-    .filter((part) => part.length > 0)
-    .flatMap((part) => {
-      const segments: PathSegment[] = [];
-      const base = part.replace(/\[.*?\]/g, (bracket) => {
-        const inner = bracket.slice(1, -1).trim();
-        if (inner === "*" || inner === "") {
-          segments.push({ kind: "any-index" });
-        } else if (/^\d+$/.test(inner)) {
-          segments.push({ kind: "index", index: Number(inner) });
+  const segments: PathSegment[] = [];
+  let rest = path.trim();
+  while (rest.length > 0) {
+    if (rest.startsWith("[")) {
+      const bracket = rest.match(/^\[\s*("(?:\\.|[^"\\])*"|\d+|\*?)\s*\]/);
+      if (!bracket) return [];
+      const inner = bracket[1];
+      if (inner.startsWith('"')) {
+        try {
+          segments.push({ kind: "name", name: JSON.parse(inner) as string });
+        } catch {
+          return [];
         }
-        return "";
-      });
-
-      if (base.length > 0) {
-        segments.unshift({ kind: "name", name: base });
+      } else if (inner === "" || inner === "*") {
+        segments.push({ kind: "any-index" });
+      } else {
+        const index = Number(inner);
+        if (!Number.isSafeInteger(index)) return [];
+        segments.push({ kind: "index", index });
       }
-      return segments;
-    });
+      rest = rest.slice(bracket[0].length);
+    } else {
+      const name = rest.match(/^[^.[\]\s"']+/);
+      if (!name) return [];
+      segments.push({ kind: "name", name: name[0] });
+      rest = rest.slice(name[0].length);
+    }
+    if (rest.startsWith(".")) {
+      rest = rest.slice(1);
+      if (!rest) return [];
+    } else if (rest && !rest.startsWith("[")) {
+      return [];
+    }
+  }
+  return segments;
+}
+
+/** Use bracket notation whenever a map key could be mistaken for path syntax. */
+export function encodePathKey(key: string): string {
+  return /^[A-Za-z_@][A-Za-z0-9_@-]*$/.test(key) ? key : `[${JSON.stringify(key)}]`;
+}
+
+export function joinPathParts(parts: string[]): string {
+  return parts.reduce((path, part) => path + (path && !part.startsWith("[") ? "." : "") + part, "");
 }
 
 function normalize(value: unknown): string | number | boolean | null | undefined {
@@ -130,11 +158,13 @@ interface CompiledFilter {
   regex: RegExp | null;
   inList: Set<string> | null;
   durationMs: number | null;
+  now: number;
 }
 
-function compileFilter(filter: FieldFilter): CompiledFilter {
+function compileFilter(filter: FieldFilter, now = Date.now()): CompiledFilter {
   return {
     filter,
+    now,
     regex: filter.operator === "regex" ? tryCompileRegex(filter.value) : null,
     inList: filter.operator === "in" ? parseInList(filter.value) : null,
     durationMs:
@@ -150,6 +180,16 @@ function tryCompileRegex(pattern: string): RegExp | null {
   } catch {
     return null;
   }
+}
+
+function regexPrefix(value: string): string {
+  let end = 0;
+  let count = 0;
+  for (const character of value) {
+    if (count++ === MAX_REGEX_TEST_LENGTH) break;
+    end += character.length;
+  }
+  return value.slice(0, end);
 }
 
 function valuesMatch(compiled: CompiledFilter, actual: string | number | boolean | null): boolean {
@@ -173,7 +213,7 @@ function valuesMatch(compiled: CompiledFilter, actual: string | number | boolean
     case "!contains":
       return !actualStr.toLowerCase().includes(filter.value.toLowerCase());
     case "regex":
-      return compiled.regex !== null && compiled.regex.test(actualStr.slice(0, MAX_REGEX_TEST_LENGTH));
+      return compiled.regex !== null && compiled.regex.test(regexPrefix(actualStr));
     case "in":
       return compiled.inList !== null && compiled.inList.size > 0 && compiled.inList.has(actualStr.toLowerCase());
     case "older_than":
@@ -181,11 +221,11 @@ function valuesMatch(compiled: CompiledFilter, actual: string | number | boolean
       if (compiled.durationMs == null) {
         return false;
       }
-      const ts = Date.parse(actualStr);
-      if (Number.isNaN(ts)) {
+      const ts = parseTimestampMs(actualStr);
+      if (ts === null) {
         return false;
       }
-      const age = Date.now() - ts;
+      const age = compiled.now - ts;
       return filter.operator === "older_than" ? age >= compiled.durationMs : age <= compiled.durationMs;
     }
     default:
@@ -245,7 +285,7 @@ export function matchesAllFilters(item: object, filters: FieldFilter[]): boolean
   return createFilterMatcher(filters)(item);
 }
 
-export function createFilterMatcher(filters: FieldFilter[]): (item: object) => boolean {
-  const groups = groupFiltersByCombinator(filters).map((group) => group.map(compileFilter));
+export function createFilterMatcher(filters: FieldFilter[], now = Date.now()): (item: object) => boolean {
+  const groups = groupFiltersByCombinator(filters).map((group) => group.map((filter) => compileFilter(filter, now)));
   return (item: object) => groups.every((group) => group.some((compiled) => matchesCompiled(item, compiled)));
 }

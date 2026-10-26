@@ -8,7 +8,7 @@ export interface KindRef {
   kind: string;
 }
 
-/** Group kinds by API group (the part before `/` in apiVersionWithGroup, or `core`). */
+/** Group kinds by API group (the part before `/` in apiVersionWithGroup, or the core API version). */
 export function groupKindsByApiGroup(resources: KindRef[]): Map<string, KindRef[]> {
   const groups = new Map<string, KindRef[]>();
   for (const resource of resources) {

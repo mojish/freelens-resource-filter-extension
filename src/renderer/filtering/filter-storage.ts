@@ -5,7 +5,7 @@
  * every access is guarded and failures degrade to no persistence.
  */
 
-import type { FieldFilter, FilterCombinator, FilterOperator } from "./filter-engine";
+import { filterOperators, type FieldFilter, type FilterCombinator, type FilterOperator } from "./filter-engine";
 import type { KubectlDialect } from "./kubectl-yq";
 
 const ACTIVE_PREFIX = "frf:v1:active:";
@@ -51,6 +51,8 @@ const DEFAULT_UI_PREFS: UiPrefs = {
 
 /** Set by renderer onActivate once ExtensionStore is loaded. */
 type UiPrefsStoreLike = {
+  localStorageMigrated: boolean;
+  markLocalStorageMigrated: () => void;
   favorites: string[];
   recent: string[];
   previewOpen: boolean;
@@ -87,9 +89,11 @@ function readLocalStorageUiPrefs(): UiPrefs {
         previewOpen = candidate.previewOpen === true;
       }
     }
-    // Always merge legacy keys so an empty blob cannot hide older favorites.
-    favorites = uniqueIds([...favorites, ...loadStringList(FAVORITES_KEY)]);
-    recent = uniqueIds([...recent, ...loadStringList(RECENT_KEY)]).slice(0, MAX_RECENT);
+    // Once the atomic blob exists it is authoritative, including empty lists.
+    if (raw == null) {
+      favorites = uniqueIds(loadStringList(FAVORITES_KEY));
+      recent = uniqueIds(loadStringList(RECENT_KEY)).slice(0, MAX_RECENT);
+    }
     const prefs = { favorites, recent, previewOpen };
     // Materialize a ui-prefs blob when only legacy keys exist.
     if ((favorites.length > 0 || recent.length > 0) && storage.getItem(UI_PREFS_KEY) == null) {
@@ -120,22 +124,16 @@ function writeLocalStorageUiPrefs(prefs: UiPrefs): void {
   }
 }
 
-/**
- * Wire Freelens ExtensionStore after onActivate. Merges any localStorage
- * leftovers into the store so upgrades / force-quit recovery keep favorites.
- */
+/** Migrate local preferences once, then treat the durable store as authoritative. */
 export function hydrateUiPrefsFromStore(store: UiPrefsStoreLike): void {
   extensionUiPrefs = store;
-  const fromLs = readLocalStorageUiPrefs();
-  const mergedFavorites = uniqueIds([...store.favorites, ...fromLs.favorites]);
-  const recent =
-    store.recent.length > 0
-      ? uniqueIds([...store.recent, ...fromLs.recent]).slice(0, MAX_RECENT)
-      : uniqueIds([...fromLs.recent]).slice(0, MAX_RECENT);
-  const previewOpen = store.previewOpen || fromLs.previewOpen;
-  store.setFavorites(mergedFavorites);
-  store.setRecent(recent);
-  store.setPreviewOpen(previewOpen);
+  if (!store.localStorageMigrated) {
+    const local = readLocalStorageUiPrefs();
+    store.setFavorites(uniqueIds([...store.favorites, ...local.favorites]));
+    store.setRecent(uniqueIds([...store.recent, ...local.recent]).slice(0, MAX_RECENT));
+    store.setPreviewOpen(store.previewOpen || local.previewOpen);
+    store.markLocalStorageMigrated();
+  }
   writeLocalStorageUiPrefs(store.toJSON());
 }
 
@@ -172,6 +170,7 @@ function isSerializedFilter(value: unknown): value is SerializedFilter {
   if (
     typeof candidate.field !== "string" ||
     typeof candidate.operator !== "string" ||
+    !(filterOperators as readonly string[]).includes(candidate.operator) ||
     typeof candidate.value !== "string"
   ) {
     return false;
@@ -248,7 +247,7 @@ function parseSets(raw: string | null): SavedFilterSet[] | undefined {
       .filter((entry) => typeof entry.name === "string" && Array.isArray(entry.filters))
       .map((entry) => ({
         name: entry.name as string,
-        filters: (entry.filters as unknown[]).filter(isSerializedFilter),
+        filters: (entry.filters as unknown[]).filter(isSerializedFilter).slice(0, MAX_ROWS),
         outputFields: parseStringArray(entry.outputFields),
         columns: parseStringArray(entry.columns),
       }))

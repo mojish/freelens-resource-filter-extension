@@ -1,6 +1,6 @@
 {
   "name": "freelens-resource-filter-extension",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Freelens extension: field-based filtering for any Kubernetes resource, including CRDs",
   "author": {
     "name": "Sotoon Delivery"
@@ -55,7 +55,8 @@
     "shx": "^0.4.0",
     "typescript": "5.9.3",
     "vite": "^8.1.2",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.0",
+    "yaml": "2.9.1"
   },
   "keywords": [
     "extension",

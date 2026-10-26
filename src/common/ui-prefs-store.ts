@@ -14,6 +14,7 @@ export interface UiPrefsModel {
   favorites: string[];
   recent: string[];
   previewOpen: boolean;
+  localStorageMigrated: boolean;
 }
 
 const MAX_RECENT = 12;
@@ -22,6 +23,7 @@ export class UiPrefsStore extends Common.Store.ExtensionStore<UiPrefsModel> {
   favorites: string[] = [];
   recent: string[] = [];
   previewOpen = false;
+  localStorageMigrated = false;
 
   constructor() {
     super({
@@ -30,12 +32,15 @@ export class UiPrefsStore extends Common.Store.ExtensionStore<UiPrefsModel> {
         favorites: [],
         recent: [],
         previewOpen: false,
+        localStorageMigrated: false,
       },
     });
     makeObservable(this, {
       favorites: observable,
       recent: observable,
       previewOpen: observable,
+      localStorageMigrated: observable,
+      markLocalStorageMigrated: action,
       fromStore: action,
       setFavorites: action,
       setRecent: action,
@@ -53,6 +58,7 @@ export class UiPrefsStore extends Common.Store.ExtensionStore<UiPrefsModel> {
       ? data.recent.filter((id): id is string => typeof id === "string").slice(0, MAX_RECENT)
       : [];
     this.previewOpen = data.previewOpen === true;
+    this.localStorageMigrated = data.localStorageMigrated === true;
   }
 
   toJSON(): UiPrefsModel {
@@ -60,7 +66,12 @@ export class UiPrefsStore extends Common.Store.ExtensionStore<UiPrefsModel> {
       favorites: this.favorites.slice(),
       recent: this.recent.slice(0, MAX_RECENT),
       previewOpen: this.previewOpen === true,
+      localStorageMigrated: this.localStorageMigrated,
     };
+  }
+
+  markLocalStorageMigrated(): void {
+    this.localStorageMigrated = true;
   }
 
   setFavorites(ids: string[]): void {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteFilterSet,
+  loadFavoriteKinds,
   loadActiveFilters,
   loadFilterSets,
   loadLastKind,
@@ -53,6 +54,20 @@ describe("filter-storage", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("does not merge stale legacy favorites into an existing empty preferences blob", () => {
+    storage.setItem("frf:v1:ui-prefs", JSON.stringify({ favorites: [], recent: [], previewOpen: false }));
+    storage.setItem("frf:v1:favorites", JSON.stringify(["v1/Pod"]));
+    expect(loadFavoriteKinds()).toEqual([]);
+  });
+
+  it("rejects unknown saved operators and caps filters inside saved sets", () => {
+    const invalid = { field: "spec.state", operator: "unknown", value: "ready" };
+    storage.setItem("frf:v1:active:v1/Widget", JSON.stringify([invalid, rows[0]]));
+    expect(loadActiveFilters("v1/Widget")).toEqual([rows[0]]);
+    storage.setItem("frf:v1:sets:v1/Widget", JSON.stringify([{ name: "many", filters: [invalid, ...Array.from({ length: 70 }, () => rows[0])] }]));
+    expect(loadFilterSets("v1/Widget")[0].filters).toEqual(Array.from({ length: 50 }, () => rows[0]));
   });
 
   it("round-trips active filters per kind", () => {

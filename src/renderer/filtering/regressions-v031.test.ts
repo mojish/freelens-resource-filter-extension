@@ -32,13 +32,13 @@ describe("fix 1 — preview updates when a filter is removed", () => {
     store.addFilter("spec.state", "=", "pending");
     store.addFilter("metadata.namespace", "=", "ns-a");
     const before = buildKubectlYqCommand(resource, store.activeFilters, "all", [], "yq");
-    expect(before).toContain("spec.state");
-    expect(before).toContain("metadata.namespace");
+    expect(before).toContain(".spec?.state?");
+    expect(before).toContain(".metadata?.namespace?");
 
     store.removeFilter(store.filters[1].id);
     const after = buildKubectlYqCommand(resource, store.activeFilters, "all", [], "yq");
-    expect(after).toContain("spec.state");
-    expect(after).not.toContain("metadata.namespace");
+    expect(after).toContain(".spec?.state?");
+    expect(after).not.toContain(".metadata?.namespace?");
     expect(after).not.toBe(before);
     expect(store.revision).toBeGreaterThan(0);
   });

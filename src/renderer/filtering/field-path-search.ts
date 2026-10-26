@@ -6,6 +6,8 @@
  * prefix hits, then segment-aligned / wildcard-friendly paths over deep named keys.
  */
 
+import { parsePath } from "./filter-engine";
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -171,7 +173,7 @@ export function rankFieldPathMatches(paths: string[], query: string): string[] {
 /** True when the typed text looks like an intentional field path. */
 export function looksLikeFieldPath(query: string): boolean {
   const trimmed = query.trim();
-  return trimmed.length > 0 && /^[A-Za-z_@][\w.\[\]*"'@-]*$/.test(trimmed) && /[.\[]/.test(trimmed);
+  return /[.\[]/.test(trimmed) && parsePath(trimmed).length > 0;
 }
 
 /**

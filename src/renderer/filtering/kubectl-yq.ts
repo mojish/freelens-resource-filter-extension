@@ -4,8 +4,8 @@
  * Default dialect: mikefarah/yq v4. Optional `jq` dialect for jq / kislyuk yq.
  */
 
-import { groupFiltersByCombinator, parsePath, type FieldFilter } from "./filter-engine";
-import { parseRelativeDurationMs } from "./time-value";
+import { groupFiltersByCombinator, parsePath, MAX_REGEX_TEST_LENGTH, type FieldFilter } from "./filter-engine";
+import { parseRelativeDurationMs, RFC3339_PATTERN } from "./time-value";
 
 export interface KubectlResourceRef {
   apiResource: string;
@@ -18,23 +18,27 @@ export type SelectedNamespaces = "all" | string[];
 export type KubectlDialect = "yq" | "jq";
 export type KubectlExportMode = "objects";
 
+/** Optional traversal skips incompatible branches of heterogeneous maps/arrays. */
 export function fieldPathToYq(path: string): string {
   let expr = "";
   for (const segment of parsePath(path)) {
     if (segment.kind === "any-index") {
-      expr += "[]";
+      expr += "[]?";
     } else if (segment.kind === "index") {
-      expr += `[${segment.index}]`;
+      expr += `[${segment.index}]?`;
+    } else if (/[?*]/.test(segment.name)) {
+      // yq treats even quoted keys as globs; select the literal key explicitly.
+      expr = `(${expr || "."} | select(tag == "!!map") | to_entries | .[] | select(.key | ${literalYqEquals(segment.name)}) | .value)`;
     } else if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(segment.name)) {
-      expr += `.${segment.name}`;
+      expr += `.${segment.name}?`;
     } else {
-      expr += `[${JSON.stringify(segment.name)}]`;
+      expr += `[${JSON.stringify(segment.name)}]?`;
     }
   }
-  return expr || ".";
+  return expr ? (expr.startsWith("[") ? `.${expr}` : expr) : path.trim() ? "null" : ".";
 }
 
-/** jq-safe optional iterators for maps/arrays. */
+/** Guard each jq segment so one incompatible branch cannot abort its siblings. */
 export function fieldPathToJq(path: string): string {
   let expr = "";
   for (const segment of parsePath(path)) {
@@ -43,12 +47,12 @@ export function fieldPathToJq(path: string): string {
     } else if (segment.kind === "index") {
       expr += `[${segment.index}]?`;
     } else if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(segment.name)) {
-      expr += `.${segment.name}`;
+      expr += `.${segment.name}?`;
     } else {
-      expr += `[${JSON.stringify(segment.name)}]`;
+      expr += `[${JSON.stringify(segment.name)}]?`;
     }
   }
-  return expr || ".";
+  return expr ? (expr.startsWith("[") ? `.${expr}` : expr) : path.trim() ? "null" : ".";
 }
 
 function yqString(value: string): string {
@@ -71,7 +75,8 @@ function kubectlResourceArg(resource: KubectlResourceRef): string {
   if (!group) {
     return resourceName;
   }
-  return `${resourceName}.${group}`;
+  const version = gv.slice(slash + 1);
+  return `${resourceName}.${version}.${group}`;
 }
 
 function namespaceFlag(resource: KubectlResourceRef, namespaces: SelectedNamespaces): string {
@@ -99,15 +104,48 @@ function namespacePredicate(
   return dialect === "yq" ? `(${clauses.join(" or ")})` : `(${clauses.join(" or ")})`;
 }
 
-function timeCutoffIso(value: string): string | null {
+function timeCutoffMs(value: string, now: number): number | null {
   const ms = parseRelativeDurationMs(value);
-  if (ms == null) {
-    return null;
-  }
-  return new Date(Date.now() - ms).toISOString();
+  return ms == null ? null : now - ms;
 }
 
-export function filterToYqPredicate(filter: FieldFilter): string | null {
+function literalYqEquals(value: string): string {
+  // yq == treats * as a glob. An escaped, anchored regex is literal equality.
+  return `test(${yqString(`^${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`)})`;
+}
+
+// Match the engine's JSON string form for containers, keeping strings unquoted.
+const yqText = '((select(tag == "!!str" or tag == "!!timestamp") | to_string), (select(tag != "!!str" and tag != "!!timestamp") | to_json(0)))';
+
+function validRegex(pattern: string): boolean {
+  try { new RegExp(pattern); return true; } catch { return false; }
+}
+
+function equalityPredicate(value: string, dialect: KubectlDialect): string {
+  const yq = dialect === "yq";
+  const lowered = yq ? `${yqText} | downcase` : "tostring | ascii_downcase";
+  const literal = yq ? literalYqEquals(value.toLowerCase()) : `. == ${yqString(value.toLowerCase())}`;
+  const alternatives = [`(${lowered} | ${literal})`];
+  const num = Number(value);
+  if (value.trim() !== "" && Number.isFinite(num)) {
+    const numeric = yq ? '(tag == "!!int" or tag == "!!float")' : '(type == "number")';
+    alternatives.push(`(${numeric} and . == ${num})`);
+  }
+  const boolean = value.trim().toLowerCase();
+  if (boolean === "true" || boolean === "false") {
+    alternatives.push(`(${yq ? 'tag == "!!bool"' : 'type == "boolean"'} and . == ${boolean})`);
+  }
+  return `(${alternatives.join(" or ")})`;
+}
+
+// Kubernetes timestamps use RFC3339. The guard makes from_yaml safe for arbitrary
+// strings; its timestamp tag also rejects invalid calendar dates before comparison.
+const yqTimestamp = `to_string | select(test(${yqString(RFC3339_PATTERN)})) | from_yaml | select(tag == "!!timestamp") | . as $t | ($t | to_unix) as $s | ($t | format_datetime(".000") | to_string | tonumber) as $f | (($s * 1000) + ($f * 1000))`;
+// jq's fromdateiso8601 accepts UTC seconds only. Parse the offset and fraction
+// explicitly, keeping milliseconds like JavaScript Date and skipping bad inputs.
+const jqTimestamp = `try (tostring | capture("^(?<date>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<fraction>\\\\.[0-9]+)?(?<zone>Z|(?<sign>[+-])(?<hours>[0-9]{2}):(?<minutes>[0-9]{2}))$") | . as $t | ($t.date + "Z" | fromdateiso8601) as $seconds | select(($seconds | strftime("%Y-%m-%dT%H:%M:%S")) == $t.date) | (if $t.zone == "Z" then 0 else (($t.hours | tonumber) * 60 + ($t.minutes | tonumber)) * 60 * (if $t.sign == "+" then 1 else -1 end) end) as $offset | select($t.zone == "Z" or (($t.hours | tonumber) < 24 and ($t.minutes | tonumber) < 60)) | (($seconds - $offset) * 1000 + ((($t.fraction // ".") + "000" | .[1:4]) | tonumber))) catch empty`;
+
+export function filterToYqPredicate(filter: FieldFilter, now = Date.now()): string | null {
   if (filter.field === "") {
     return null;
   }
@@ -120,49 +158,53 @@ export function filterToYqPredicate(filter: FieldFilter): string | null {
   }
 
   const path = fieldPathToYq(filter.field);
-  const lowered = `(${path} | to_string | downcase)`;
+  // A row matches if any non-null value matches. Reduce the whole path before
+  // select, especially for !exists on a mix of present and missing entries.
+  const anyValue = (predicate: string): string =>
+    `([${path} | select(. != null) | (${predicate})] | any)`;
+  const lowered = `(${yqText} | downcase)`;
   const needle = yqString(filter.value.toLowerCase());
 
   switch (filter.operator) {
     case "=":
-      return `${lowered} == ${needle}`;
+      return anyValue(equalityPredicate(filter.value, "yq"));
     case "!=":
-      return `${lowered} != ${needle}`;
+      return anyValue(`(${equalityPredicate(filter.value, "yq")}) | not`);
     case "contains":
-      return `${lowered} | contains(${needle})`;
+      return anyValue(`${lowered} | contains(${needle})`);
     case "!contains":
-      return `(${lowered} | contains(${needle})) | not`;
+      return anyValue(`(${lowered} | contains(${needle})) | not`);
     case "regex":
-      return `(${path} | to_string | test(${yqString(filter.value)}))`;
+      return validRegex(filter.value) ? anyValue(`${yqText} | split("") | .[0:${MAX_REGEX_TEST_LENGTH}] | join("") | test(${yqString(filter.value)})`) : "false";
     case "in": {
       const parts = filter.value
         .split(",")
         .map((part) => part.trim().toLowerCase())
         .filter((part) => part.length > 0)
-        .map((part) => `. == ${yqString(part)}`);
+        .map((part) => literalYqEquals(part));
       if (parts.length === 0) {
         return null;
       }
-      return `${lowered} | (${parts.join(" or ")})`;
+      return anyValue(`${lowered} | (${parts.join(" or ")})`);
     }
     case "exists":
-      return `${path} != null`;
+      return anyValue('to_string != ""');
     case "!exists":
-      return `${path} == null`;
+      return `(${anyValue('to_string != ""')} | not)`;
     case "older_than": {
-      const cutoff = timeCutoffIso(filter.value);
-      return cutoff ? `(${path} | to_string) < ${yqString(cutoff)}` : null;
+      const cutoff = timeCutoffMs(filter.value, now);
+      return cutoff !== null ? anyValue(`${yqTimestamp} | . <= ${cutoff}`) : null;
     }
     case "newer_than": {
-      const cutoff = timeCutoffIso(filter.value);
-      return cutoff ? `(${path} | to_string) >= ${yqString(cutoff)}` : null;
+      const cutoff = timeCutoffMs(filter.value, now);
+      return cutoff !== null ? anyValue(`${yqTimestamp} | . >= ${cutoff}`) : null;
     }
     default:
       return null;
   }
 }
 
-export function filterToJqPredicate(filter: FieldFilter): string | null {
+export function filterToJqPredicate(filter: FieldFilter, now = Date.now()): string | null {
   if (filter.field === "") {
     return null;
   }
@@ -175,21 +217,21 @@ export function filterToJqPredicate(filter: FieldFilter): string | null {
   }
 
   const path = fieldPathToJq(filter.field);
-  const generator = `(try ${path} catch empty)`;
+  const generator = `(try ${path} catch empty) | select(. != null)`;
   const lowered = "(. | tostring | ascii_downcase)";
   const needle = yqString(filter.value.toLowerCase());
 
   switch (filter.operator) {
     case "=":
-      return `any(${generator}; ${lowered} == ${needle})`;
+      return `any(${generator}; ${equalityPredicate(filter.value, "jq")})`;
     case "!=":
-      return `any(${generator}; ${lowered} != ${needle})`;
+      return `any(${generator}; (${equalityPredicate(filter.value, "jq")}) | not)`;
     case "contains":
       return `any(${generator}; ${lowered} | contains(${needle}))`;
     case "!contains":
       return `any(${generator}; (${lowered} | contains(${needle})) | not)`;
     case "regex":
-      return `any(${generator}; (. | tostring) | test(${yqString(filter.value)}))`;
+      return validRegex(filter.value) ? `any(${generator}; (. | tostring | .[0:${MAX_REGEX_TEST_LENGTH}]) | test(${yqString(filter.value)}))` : "false";
     case "in": {
       const parts = filter.value
         .split(",")
@@ -206,12 +248,12 @@ export function filterToJqPredicate(filter: FieldFilter): string | null {
     case "!exists":
       return `(any(${generator}; . != null and (. | tostring) != "") | not)`;
     case "older_than": {
-      const cutoff = timeCutoffIso(filter.value);
-      return cutoff ? `any(${generator}; (. | tostring) < ${yqString(cutoff)})` : null;
+      const cutoff = timeCutoffMs(filter.value, now);
+      return cutoff !== null ? `any(${generator}; (${jqTimestamp}) <= ${cutoff})` : null;
     }
     case "newer_than": {
-      const cutoff = timeCutoffIso(filter.value);
-      return cutoff ? `any(${generator}; (. | tostring) >= ${yqString(cutoff)})` : null;
+      const cutoff = timeCutoffMs(filter.value, now);
+      return cutoff !== null ? `any(${generator}; (${jqTimestamp}) >= ${cutoff})` : null;
     }
     default:
       return null;
@@ -226,7 +268,7 @@ export function projectionToYq(paths: string[]): string | null {
   if (unique.length === 1) {
     return fieldPathToYq(unique[0]);
   }
-  const entries = unique.map((path) => `${yqString(path)}: ${fieldPathToYq(path)}`);
+  const entries = unique.map((path) => `${yqString(path)}: ([${fieldPathToYq(path)}] | ((select(length <= 1) | .[0]), select(length > 1)))`);
   return `{${entries.join(", ")}}`;
 }
 
@@ -238,7 +280,7 @@ function projectionToJq(paths: string[]): string | null {
   if (unique.length === 1) {
     return fieldPathToJq(unique[0]);
   }
-  const entries = unique.map((path) => `${yqString(path)}: ${fieldPathToJq(path)}`);
+  const entries = unique.map((path) => `${yqString(path)}: ([${fieldPathToJq(path)}] | if length <= 1 then .[0] else . end)`);
   return `{${entries.join(", ")}}`;
 }
 
@@ -249,8 +291,9 @@ function groupPredicates(
   const groups = groupFiltersByCombinator(filters);
   const out: string[] = [];
   for (const group of groups) {
-    const parts = group.map(toPredicate).filter((p): p is string => p !== null);
-    if (parts.length === 0) {
+    const parts = group.map(toPredicate);
+    // A disabled row is true in the UI; OR with it disables the whole group.
+    if (!parts.every((part): part is string => part !== null)) {
       continue;
     }
     out.push(parts.length === 1 ? parts[0] : `(${parts.join(" or ")})`);
@@ -277,13 +320,14 @@ export function buildKubectlYqCommand(
   outputFields: string[] = [],
   dialect: KubectlDialect = "yq",
   mode: KubectlExportMode = "objects",
+  now = Date.now(),
 ): string {
   const resourceArg = kubectlResourceArg(resource);
   const nsFlag = namespaceFlag(resource, namespaces);
   const outputFlag = dialect === "jq" ? "json" : "yaml";
   const kubectl = `kubectl get ${resourceArg}${nsFlag} -o ${outputFlag}`;
 
-  const toPredicate = dialect === "yq" ? filterToYqPredicate : filterToJqPredicate;
+  const toPredicate = (filter: FieldFilter) => dialect === "yq" ? filterToYqPredicate(filter, now) : filterToJqPredicate(filter, now);
   const predicates = [
     ...groupPredicates(filters, toPredicate),
     namespacePredicate(resource, namespaces, dialect),

@@ -22,5 +22,20 @@ export function parseRelativeDurationMs(value: string): number | null {
     h: 3_600_000,
     d: 86_400_000,
   };
-  return amount * (multipliers[unit] ?? 0);
+  const ms = amount * (multipliers[unit] ?? 0);
+  // Stay within Date's supported range and exact integer milliseconds.
+  return Number.isSafeInteger(ms) && ms <= 8_640_000_000_000_000 ? ms : null;
+}
+
+/** Kubernetes/RFC3339 timestamps, including fractional seconds and numeric offsets. */
+export const RFC3339_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$";
+const timestampPattern = new RegExp(RFC3339_PATTERN);
+
+export function parseTimestampMs(value: string): number | null {
+  if (!timestampPattern.test(value)) return null;
+  // Date.parse normalizes impossible dates such as February 31. Reject those.
+  const calendar = new Date(`${value.slice(0, 19)}Z`);
+  if (Number.isNaN(calendar.getTime()) || calendar.toISOString().slice(0, 19) !== value.slice(0, 19)) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
 }

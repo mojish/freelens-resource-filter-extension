@@ -63,7 +63,7 @@ function firstValue(object: object, path: string): string {
   if (values.length === 0) {
     return "";
   }
-  return values.map((value) => String(value)).join(", ");
+  return values.map((value) => typeof value === "object" ? JSON.stringify(value) : String(value)).join(", ");
 }
 
 function truncate(value: string): string {
@@ -78,7 +78,9 @@ function columnTitle(path: string): string {
 export const ResourceFilterPage = observer(() => {
   const [filterStore] = React.useState(() => new FilterStore());
   const [selectedId, setSelectedId] = React.useState<string | undefined>(() => loadLastKind());
-  const [store, setStore] = React.useState<KubeStore | null | undefined>(undefined);
+  const [resolvedStore, setResolvedStore] = React.useState<{ apiBase: string; store: KubeStore | null }>();
+  const [sessionKindId, setSessionKindId] = React.useState<string>();
+  const [now, setNow] = React.useState(() => Date.now());
   const [savedSets, setSavedSets] = React.useState<SavedFilterSet[]>([]);
   const [outputFields, setOutputFields] = React.useState<string[]>([]);
   const [userColumns, setUserColumns] = React.useState<string[]>([]);
@@ -122,7 +124,10 @@ export const ResourceFilterPage = observer(() => {
   }, [resources.length]);
 
   React.useEffect(() => {
-    const id = window.setInterval(() => setNsSnapshot(selectedNamespaces()), 1000);
+    const id = window.setInterval(() => {
+      setNsSnapshot(selectedNamespaces());
+      setNow(Date.now());
+    }, 1000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -162,15 +167,18 @@ export const ResourceFilterPage = observer(() => {
   );
 
   React.useEffect(() => {
-    setStore(selected ? (getStoreForResource(selected) ?? null) : undefined);
+    setResolvedStore(selected ? { apiBase: selected.apiBase, store: getStoreForResource(selected) ?? null } : undefined);
     return undefined;
   }, [selected]);
 
+  // Never mount the newly selected kind with the previous kind's store.
+  const store = resolvedStore?.apiBase === selected?.apiBase ? resolvedStore?.store : undefined;
   const items: KubeObject[] = store ? store.items : [];
   const isLoaded = store?.isLoaded ?? false;
 
+  // Observe resource versions during every render; host arrays can mutate in place.
+  const fp = itemsFingerprint(items as object[]);
   const catalog: FieldCatalog = React.useMemo(() => {
-    const fp = itemsFingerprint(items as object[]);
     if (!shouldRebuildCatalog(catalogFingerprintRef.current, fp, items.length)) {
       return catalogCacheRef.current;
     }
@@ -178,14 +186,17 @@ export const ResourceFilterPage = observer(() => {
     const next = collectFieldPaths(items as object[]);
     catalogCacheRef.current = next;
     return next;
-  }, [items, items.length, isLoaded]);
+  }, [items, fp, isLoaded]);
 
   const autoColumns = React.useMemo(() => derivedColumns(catalog), [catalog]);
   const columns = React.useMemo(() => {
     if (userColumns.length === 0) {
       return autoColumns;
     }
-    return userColumns.map((path) => ({ path, title: columnTitle(path) }));
+    const titles = userColumns.map(columnTitle);
+    return userColumns.map((path, index) => ({
+      path, title: titles.filter((title) => title === titles[index]).length > 1 ? path : titles[index],
+    }));
   }, [userColumns, autoColumns]);
 
   React.useEffect(() => {
@@ -206,6 +217,8 @@ export const ResourceFilterPage = observer(() => {
     setOutputFields(session.outputFields);
     setUserColumns(session.columns);
     setDialect(session.dialect);
+    setSessionKindId(selectedId);
+    setDetailObject(null);
 
     const disposer = autorun(() => {
       saveActiveFilters(selectedId, filterStore.serializable);
@@ -214,11 +227,11 @@ export const ResourceFilterPage = observer(() => {
   }, [selectedId, filterStore]);
 
   React.useEffect(() => {
-    if (!selectedId) {
+    if (!selectedId || selectedId !== sessionKindId) {
       return;
     }
     saveKindSession(selectedId, { outputFields, columns: userColumns, dialect });
-  }, [selectedId, outputFields, userColumns, dialect]);
+  }, [selectedId, sessionKindId, outputFields, userColumns, dialect]);
 
   React.useEffect(() => {
     setSavedSets(selectedId ? loadFilterSets(selectedId) : []);
@@ -267,25 +280,17 @@ export const ResourceFilterPage = observer(() => {
   void filterStore.revision;
 
   const scopedItems = React.useMemo(
-    () => filterItemsByNamespace(items as object[], nsSnapshot),
-    [items, nsSnapshot],
+    () => filterItemsByNamespace([...items] as object[], nsSnapshot),
+    [items, fp, nsSnapshot],
   );
 
   const filteredItems = React.useMemo(() => {
     if (activeRows.length === 0) {
       return scopedItems;
     }
-    const knownPaths = fieldPathsOf(catalog);
-    const effective =
-      knownPaths.length === 0
-        ? activeRows
-        : activeRows.filter((row) => row.field === "" || knownPaths.includes(row.field));
-    if (effective.length === 0) {
-      return scopedItems;
-    }
-    const matcher = createFilterMatcher(effective);
+    const matcher = createFilterMatcher(activeRows, now);
     return scopedItems.filter((item) => matcher(item));
-  }, [scopedItems, activeRows, catalog, matchSignature]);
+  }, [scopedItems, activeRows, matchSignature, now]);
 
   const filterItems = React.useCallback(
     (list: KubeObject[]): KubeObject[] => {
@@ -294,18 +299,10 @@ export const ResourceFilterPage = observer(() => {
       if (activeRows.length === 0) {
         return scoped;
       }
-      const knownPaths = fieldPathsOf(catalog);
-      const effective =
-        knownPaths.length === 0
-          ? activeRows
-          : activeRows.filter((row) => row.field === "" || knownPaths.includes(row.field));
-      if (effective.length === 0) {
-        return scoped;
-      }
-      const matcher = createFilterMatcher(effective);
+      const matcher = createFilterMatcher(activeRows, now);
       return scoped.filter((item) => matcher(item as object));
     },
-    [activeRows, catalog, matchSignature],
+    [activeRows, matchSignature, now],
   );
 
   const emptyHints = React.useMemo(
@@ -329,7 +326,7 @@ export const ResourceFilterPage = observer(() => {
       age: (object: KubeObject) => String(object.getCreationTimestamp()),
     };
     for (const column of columns) {
-      callbacks[column.title] = (object: KubeObject) => firstValue(object as object, column.path);
+      callbacks[`field:${column.path}`] = (object: KubeObject) => firstValue(object as object, column.path);
     }
     return callbacks;
   }, [columns]);
@@ -341,8 +338,8 @@ export const ResourceFilterPage = observer(() => {
       { title: "Age", sortBy: "age", id: "age", className: "age" },
       ...columns.map((column) => ({
         title: column.title,
-        sortBy: column.title,
-        id: column.title,
+        sortBy: `field:${column.path}`,
+        id: `field:${column.path}`,
         className: "derived",
       })),
       { title: "Summary", id: "summary", className: "summary" },
@@ -364,7 +361,7 @@ export const ResourceFilterPage = observer(() => {
       object.getNs() ? <LinkToNamespace key="namespace" namespace={object.getNs()} /> : "",
       <KubeObjectAge key="age" object={object} />,
       ...columns.map((column) => (
-        <WithTooltip key={column.title}>
+        <WithTooltip key={column.path}>
           <span style={pageStyles.summary}>{truncate(firstValue(object as object, column.path)) || "—"}</span>
         </WithTooltip>
       )),
@@ -377,22 +374,31 @@ export const ResourceFilterPage = observer(() => {
 
   const isFavorite = selectedId ? favorites.includes(selectedId) : false;
 
+  // Freelens Select creates a new Menu component on every render. Keep this
+  // element stable so namespace polling and item updates don't reset its scroll.
+  const resourcePicker = React.useMemo(
+    () => (
+      <Select
+        className="resource-picker"
+        placeholder="1. Select resource kind — this page's favorites ★ and recent ↻ sort first"
+        value={selectedId}
+        options={resourceOptions}
+        isSearchable
+        onChange={(option: StringOption | null) => {
+          if (option) {
+            setSelectedId(option.value);
+          }
+        }}
+      />
+    ),
+    [selectedId, resourceOptions],
+  );
+
   return (
     <div className="ItemListLayout flex column ResourceFilterPage" style={pageStyles.container}>
       <style>{rowStyles}</style>
-      <div style={pageStyles.pickerRow}>
-        <Select
-          className="resource-picker"
-          placeholder="1. Select resource kind — favorites ★ and recent ↻ sort first"
-          value={selectedId}
-          options={resourceOptions}
-          isSearchable
-          onChange={(option: StringOption | null) => {
-            if (option) {
-              setSelectedId(option.value);
-            }
-          }}
-        />
+      <div style={pageStyles.pickerRow} title="Resource Filter favorites are separate from Freelens sidebar favorites.">
+        {resourcePicker}
         {selectedId && (
           <Button
             label={isFavorite ? "Unfavorite" : "Favorite"}
@@ -406,7 +412,9 @@ export const ResourceFilterPage = observer(() => {
       </div>
 
       <FilterBar
+        key={selectedId ?? "no-kind"}
         store={filterStore}
+        now={now}
         catalog={catalog}
         listState={listState}
         kindId={selectedId ?? null}
@@ -453,6 +461,7 @@ export const ResourceFilterPage = observer(() => {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="resource-filter-list-hint">Tip: click a resource name to peek its JSON.</div>
             <KubeObjectListLayout<KubeObject, Renderer.K8sApi.KubeApi<KubeObject>>
+              key={selected.id}
               tableId={`resourceFilterTable:${selected.id}`}
               store={store}
               className={`ResourceFilter ${selected.kind}`}

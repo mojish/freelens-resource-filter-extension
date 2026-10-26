@@ -16,6 +16,6 @@ export const OPERATOR_HELP: Partial<Record<FilterOperator, string>> = {
   in: "Comma-separated list. Matches if any element is one of the values.",
   exists: "Field is present and non-empty.",
   "!exists": "Field is missing or empty.",
-  older_than: "Timestamp older than a relative duration (e.g. 7d, 24h, 30m).",
-  newer_than: "Timestamp newer than a relative duration (e.g. 7d, 24h, 30m).",
+  older_than: "RFC3339 timestamp older than a relative duration (e.g. 7d, 24h, 30m).",
+  newer_than: "RFC3339 timestamp newer than a relative duration (e.g. 7d, 24h, 30m).",
 };

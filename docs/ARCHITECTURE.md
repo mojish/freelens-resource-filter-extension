@@ -14,9 +14,9 @@
 - `src/renderer/filtering/kubectl-yq.ts` — builds `kubectl | yq` (mikefarah v4, `-o yaml`) or `kubectl | jq` (`-o json`; jq cannot parse YAML).
 - `src/renderer/filtering/namespace-scope.ts` — applies the Freelens namespace picker to in-memory items (download, counts, list filter).
 - `src/renderer/filtering/filter-storage.ts` — best-effort localStorage: active filters and sets per kind, per-kind session (output fields / columns / dialect), last kind, and `frf:v1:ui-prefs` (favorites, recent, preview open).
-- `src/renderer/filtering/download-matches.ts` — projects downloaded JSON to selected output fields.
+- `src/renderer/filtering/download-matches.ts` — projects matches to selected fields; serializes a JSON-compatible list as YAML (`yaml`, bundled) or JSON.
 - `src/renderer/discovery/api-discovery.ts` — enumerates kinds from `Renderer.K8sApi.apiManager`.
-- `src/main/index.ts` — empty stub (no main-process features).
+- `src/main/index.ts` — activates the durable UI preferences store in the main process.
 - `electron.vite.config.js` + `build/global-externals.js` — renderer entry under the `preload` key; CommonJS + `preserveModules`.
 
 ## System context
@@ -41,14 +41,24 @@ flowchart LR
 - Built-in resource pages are never modified. Freelens exposes no hook to inject filters into built-in lists.
 - Host modules stay external (`@freelensapp/extensions`, `react`, `react-dom`, `mobx`, `mobx-react`, `react-router-dom`) via `build/global-externals.js`.
 - Output stays CommonJS with `preserveModules` (`out/main/index.js`, `out/renderer/index.js`).
+- Resource changes resolve the new store before mounting a keyed host list; Freelens subscribes to stores at mount. Pinned columns use path-based sorting IDs and object cells show JSON.
+- Relative-time rows, counts and preview use a shared clock snapshot refreshed every second; a matcher captures its evaluation time.
 - Source compiles under tsc, oxc, and esbuild — no MobX decorators; use `makeObservable` maps.
 - `apiManager.getStore(apiBase)` lazily creates CRD stores — call only from an effect, never during render.
-- Field catalog comes from live items (sample of 200). Empty items ⇒ empty field dropdown. Rebuild skips when item fingerprints are unchanged.
-- Filter rows: empty field/value disables a row (`exists` / `!exists` ignore value). Stale fields (absent from catalog) are marked and skipped.
+- Field catalog comes from live items (sample of 200). Empty items ⇒ empty field dropdown. Resource-version fingerprints are read outside React memoization so MobX in-place, same-length updates invalidate catalog and count snapshots. Rebuild skips unchanged fingerprints.
+- Filter rows: empty field/value disables a row (`exists` / `!exists` ignore value). Fields absent from the sampled catalog are marked but still applied. Sampling only limits suggestions, not matching. Auto-columns require observed scalar values.
 - Combinators: default AND between rows; toggle OR on a row to join it with the previous into an OR-group; groups are ANDed.
 - Namespace scope: Freelens namespace picker drives kubectl `-n` / `-A`, match counts, download, and list filtering (`namespace-scope.ts`).
+- The kind picker element is memoized independently of namespace polling and item updates. Freelens Select recreates its menu on render, so unrelated parent renders must not reset the open menu's scroll.
+- Kind favorites are owned by this extension, separate from Freelens sidebar favorites. They sort before recent and other kinds.
+- yq predicates reduce non-null path values to one boolean per row; existence also excludes empty strings. `!exists` negates existence across the whole path, including wildcard paths.
+- Both command dialects use optional access on each path segment (`.field?`, `[]?`, `[0]?`). A wildcard encountering an incompatible array/scalar skips that branch while retaining valid siblings, in filters and projections. A whole-path `try` alone would abort remaining branches after an error.
+- The yq/jq dialect controls command generation and downloads: yq uses YAML (`.yaml`, `application/yaml`), jq JSON (`.json`, `application/json`). Both downloads preserve the same list shape, field projection, namespace scope and JSON representation (including resource `toJSON()`).
+- Paths accept JSON-quoted map keys (`metadata.labels["app.kubernetes.io/name"]`) and optional array/map traversal. Invalid paths fail closed.
+- Query parsing is quote-aware and atomic: any invalid clause rejects the whole query; empty input clears rows. Existence operators take no value.
+- Commands compare literal strings (escaping yq's glob equality), support numeric/boolean equality semantics, and exclude null values. Age filters compare RFC3339 instants at millisecond precision; invalid dates do not match. Invalid durations disable a row, including its OR group as in the engine. Invalid regex syntax produces a false predicate instead of a failing command. Regex input is capped at 10,000 Unicode code points in all engines. Multi-field projections reduce each path to null, a scalar, or an array, so each resource yields one object. Commands include the selected API version. Regex syntax still differs across JavaScript, Go/yq and jq; jq lowercases ASCII only.
 - Filtering / export code must stay kind-agnostic — no hard-coded CRD or product names in logic or examples.
-- Persistence is best-effort. Filters/sets use cluster-frame localStorage (`frf:v1:*`). Favorites / recent / preview-open use Freelens `ExtensionStore` (`resource-filter-ui-prefs`) with localStorage merge backup — localStorage alone can lose the last write on force-quit.
+- Persistence is best-effort. Filters/sets use cluster-frame localStorage (`frf:v1:*`). Favorites / recent / preview-open use Freelens `ExtensionStore` (`resource-filter-ui-prefs`) with a persisted `localStorageMigrated` flag. Local/legacy preferences are imported once, then the durable store is authoritative, including empty favorites and `previewOpen: false`. The atomic localStorage blob supersedes legacy keys.
 
 ## Primary flow
 
@@ -74,5 +84,5 @@ sequenceDiagram
     AM-->>L: items
     P->>P: catalog + match count N/M
     U->>P: Copy kubectl|yq / Download matches
-    FE-->>U: filtered table / shell command / JSON file
+    FE-->>U: filtered table / shell command / YAML or JSON file
 ```

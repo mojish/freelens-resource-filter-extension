@@ -31,7 +31,8 @@ import {
 import type { SavedFilterSet } from "../filtering/filter-storage";
 import { parseFilterQuery, serializeFilterQuery } from "../filtering/filter-query";
 import { valueSuggestionsFromItems } from "../filtering/filtered-values";
-import { downloadPayload } from "../filtering/download-matches";
+import { parseRelativeDurationMs } from "../filtering/time-value";
+import { downloadPayload, serializeDownload } from "../filtering/download-matches";
 import { filterItemsByNamespace } from "../filtering/namespace-scope";
 import { OPERATOR_HELP, PATH_WILDCARD_HELP } from "../filtering/semantic-docs";
 import { formatNamespaceBadge } from "../filtering/namespace-badge";
@@ -49,6 +50,7 @@ export type ListState = "no-kind" | "loading" | "empty" | "ready";
 
 export interface FilterBarProps {
   store: FilterStore;
+  now?: number;
   catalog: FieldCatalog;
   listState: ListState;
   kindId: string | null;
@@ -136,6 +138,7 @@ export function selectedNamespaces(): SelectedNamespaces {
 export const FilterBar = observer(
   ({
     store,
+    now = Date.now(),
     catalog,
     listState,
     kindId,
@@ -161,6 +164,7 @@ export const FilterBar = observer(
     const [activeSetName, setActiveSetName] = React.useState<string | undefined>(undefined);
     const [copied, setCopied] = React.useState(false);
     const [queryText, setQueryText] = React.useState("");
+    const [queryError, setQueryError] = React.useState("");
     const [nsSnapshot, setNsSnapshot] = React.useState<SelectedNamespaces>(() => selectedNamespaces());
     const [previewOpen, setPreviewOpen] = React.useState(() => loadPreviewOpen());
 
@@ -181,6 +185,7 @@ export const FilterBar = observer(
     const querySerialized = serializeFilterQuery(store.filters);
     React.useEffect(() => {
       setQueryText(querySerialized);
+      setQueryError("");
     }, [querySerialized]);
 
     React.useEffect(() => {
@@ -234,7 +239,7 @@ export const FilterBar = observer(
     };
 
     const previewCommand = resource
-      ? buildKubectlYqCommand(resource, activeFilters, nsSnapshot, outputFields, dialect, "objects")
+      ? buildKubectlYqCommand(resource, activeFilters, nsSnapshot, outputFields, dialect, "objects", now)
       : "";
     void matchSignature;
 
@@ -266,19 +271,22 @@ export const FilterBar = observer(
       const matched =
         store.activeFilters.length === 0 ? inScope : inScope.filter(createFilterMatcher(store.activeFilters));
       const payload = downloadPayload(inScope, matched, outputFields);
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const download = serializeDownload(payload, dialect);
+      const blob = new Blob([download.content], { type: download.mimeType });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `${resource?.kind ?? "resources"}-filtered.json`;
+      anchor.download = `${resource?.kind ?? "resources"}-filtered.${download.extension}`;
       anchor.click();
       URL.revokeObjectURL(url);
     };
 
     const applyQuery = (): void => {
-      const parsed = parseFilterQuery(queryText);
-      if (parsed.length > 0) {
-        store.setFilters(parsed);
+      try {
+        store.setFilters(parseFilterQuery(queryText));
+        setQueryError("");
+      } catch (error) {
+        setQueryError(error instanceof Error ? error.message : "Invalid query");
       }
     };
 
@@ -311,7 +319,10 @@ export const FilterBar = observer(
             data-testid="filter-query-bar"
             placeholder='Query: spec.state = pending OR status.phase = Running'
             value={queryText}
-            onChange={(event) => setQueryText(event.target.value)}
+            onChange={(event) => {
+              setQueryText(event.target.value);
+              setQueryError("");
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 applyQuery();
@@ -320,6 +331,8 @@ export const FilterBar = observer(
           />
           <Button label="Apply query" onClick={applyQuery} data-testid="apply-query" />
         </div>
+
+        {queryError && <div role="alert">{queryError}</div>}
 
         {store.filters.map((filter, index) => (
           <FilterRow
@@ -330,6 +343,7 @@ export const FilterBar = observer(
             paths={paths}
             listState={listState}
             suggestionItems={suggestionItems}
+            now={now}
           />
         ))}
 
@@ -377,7 +391,7 @@ export const FilterBar = observer(
           )}
           {resource && (
             <Button
-              label="Download matches"
+              label={`Download matches (${dialect === "yq" ? "YAML" : "JSON"})`}
               onClick={downloadMatches}
               disabled={matchCount === 0}
               data-testid="download-matches"
@@ -431,10 +445,17 @@ export const FilterBar = observer(
           )}
         </div>
 
+        {dialect === "yq" && activeFilters.some((filter) => filter.operator === "regex") && (
+          <div className="resource-filter-list-hint" role="note">
+            yq requires mikefarah/yq v4 and uses Go regular expressions. For lookahead,
+            lookbehind, or backreferences, choose jq.
+          </div>
+        )}
+
         {resource && (
           <div className="resource-filter-output flex column gaps" data-testid="kubectl-output-fields">
             <div className="flex gaps align-center wrap">
-              <span className="resource-filter-output-label">kubectl output fields</span>
+              <span className="resource-filter-output-label" title="Fields used in copied commands and downloaded matches">Output fields</span>
               <button
                 type="button"
                 className={`resource-filter-chip${outputFields.length === 0 ? " is-active" : ""}`}
@@ -543,21 +564,24 @@ interface FilterRowProps {
   paths: string[];
   listState: ListState;
   suggestionItems: object[];
+  now: number;
 }
 
-const FilterRow = observer(({ filter, index, store, paths, listState, suggestionItems }: FilterRowProps) => {
-  const peerFiltered = React.useMemo(() => {
+const FilterRow = observer(({ filter, index, store, paths, listState, suggestionItems, now }: FilterRowProps) => {
+  const peerFiltered = (() => {
     const others = store.activeFilters.filter((row) => row.id !== filter.id);
     if (others.length === 0) {
       return suggestionItems;
     }
-    const matcher = createFilterMatcher(others);
+    const matcher = createFilterMatcher(others, now);
     return suggestionItems.filter((item) => matcher(item));
-  }, [suggestionItems, store.activeFilters, store.matchSignature, filter.id]);
+  })();
 
   const suggestions = valueSuggestionsFromItems(peerFiltered, filter.field);
   const needsValue = filter.operator !== "exists" && filter.operator !== "!exists";
   const stale = filter.field !== "" && paths.length > 0 && !paths.includes(filter.field);
+  const invalidDuration = (filter.operator === "older_than" || filter.operator === "newer_than") &&
+    filter.value !== "" && parseRelativeDurationMs(filter.value) == null;
   const combinator = filter.combinator ?? "and";
 
   return (
@@ -630,10 +654,11 @@ const FilterRow = observer(({ filter, index, store, paths, listState, suggestion
         <div className="resource-filter-value-placeholder box grow" />
       )}
 
+      {invalidDuration && <span role="alert">Invalid duration; row inactive. Use e.g. 7d or 24h.</span>}
       {stale ? (
         <Icon
           material="warning"
-          title="Field is not present in this kind — this row is ignored"
+          title="Field not found in sampled objects; this filter is still applied"
           className="resource-filter-stale-icon"
         />
       ) : null}

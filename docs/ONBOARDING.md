@@ -17,13 +17,13 @@ A [Freelens](https://freelens.app) extension. It adds one cluster page, **Resour
 ```
 freelens-resource-filter-extension/
 ├── build/                  # global-externals plugin: maps host modules to globals
-├── src/main/               # main-process entry (empty stub)
+├── src/main/               # main-process durable preferences activation
 ├── src/renderer/
 │   ├── index.tsx           # page + sidebar menu registration
 │   ├── components/         # ResourceFilterPage, FilterBar, ErrorBoundary, styles
 │   ├── discovery/          # resource-kind discovery via apiManager
 │   └── filtering/          # engine, paths, kubectl export, store, persistence, tests
-├── tests/                  # render smoke test against the built bundle
+├── tests/                  # built-renderer, browser, and updater regressions
 ├── docs/                   # this documentation set
 └── update-installed.sh     # deploy helper for the local Freelens profile
 ```
@@ -42,15 +42,15 @@ freelens-resource-filter-extension/
 
 | Question | Where to look |
 |---|---|
-| Why is my filter row ignored? | Operator / empty-value rules in `filter-engine.ts`; stale fields if path missing from catalog |
+| Why is my filter row ignored? | Operator / empty-value rules in `filter-engine.ts`; invalid-duration rules; missing catalog paths still apply |
 | How do AND / OR rows combine? | `groupFiltersByCombinator` / `createFilterMatcher` in `filter-engine.ts` |
 | Why is the field dropdown empty? | `field-paths.ts` (needs loaded items); search ranking in `field-path-search.ts` |
 | Why does kubectl\|jq fail on YAML? | jq dialect must use `-o json` — see `kubectl-yq.ts` |
 | Why does download include other namespaces? | `namespace-scope.ts` + Freelens namespace picker (fixed in 0.3.2+) |
-| Where do filters / favorites persist? | Filters/sets: cluster-frame localStorage (`filter-storage.ts`). Favorites/recent: Freelens ExtensionStore + localStorage merge (`src/common/ui-prefs-store.ts`) |
+| Where do filters / favorites persist? | Filters/sets: cluster-frame localStorage (`filter-storage.ts`). Favorites/recent: Freelens ExtensionStore after one-time localStorage migration (`src/common/ui-prefs-store.ts`) |
 | Where does the kind list come from? | `discovery/api-discovery.ts` |
 | The page does not render. What now? | `~/.config/Freelens/logs/lens-renderer-cluster-*-frame.log` |
-| How do I deploy a code change locally? | Quit Freelens, then `./update-installed.sh` |
+| How do I deploy a code change locally? | Run `pnpm verify`, quit Freelens, then `./update-installed.sh` |
 
 ## Companion documents
 

@@ -5,6 +5,8 @@
  * and how many sampled items carry each path (presence) for column derivation.
  */
 
+import { encodePathKey, joinPathParts } from "./filter-engine";
+
 const MAX_PATHS = 500;
 const MAX_VALUE_SUGGESTIONS = 100;
 const MAX_ARRAY_DEPTH = 3;
@@ -55,7 +57,7 @@ function walk(node: unknown, prefix: string[], ctx: WalkContext, itemIndex: numb
   }
 
   if (Array.isArray(node)) {
-    const path = prefix.length > 0 ? `${prefix.join(".")}[*]` : "[*]";
+    const path = prefix.length > 0 ? `${joinPathParts(prefix)}[*]` : "[*]";
 
     for (const element of node) {
       recordValue(ctx.valuesByPath, path, element);
@@ -77,8 +79,9 @@ function walk(node: unknown, prefix: string[], ctx: WalkContext, itemIndex: numb
 
   const entries = Object.entries(node as Record<string, unknown>);
 
-  for (const [key, value] of entries) {
-    const path = [...prefix, key].join(".");
+  for (const [rawKey, value] of entries) {
+    const key = encodePathKey(rawKey);
+    const path = joinPathParts([...prefix, key]);
 
     if (value == null || typeof value !== "object") {
       recordValue(ctx.valuesByPath, path, value);
@@ -186,7 +189,7 @@ export function derivedColumns(catalog: FieldCatalog, limit = 2): DerivedColumn[
       continue;
     }
     // only paths that are also plain scalar leaves in the value catalog
-    if (!catalog.valuesByPath.has(path)) {
+    if ((catalog.valuesByPath.get(path)?.size ?? 0) === 0) {
       continue;
     }
     candidates.push({ path, presence: count });
