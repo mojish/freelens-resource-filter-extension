@@ -38,9 +38,9 @@ The canonical command set — build, test, pack, install — lives in [docs/DEVE
 
 ## Gotchas
 
-- Installing a `*.tgz` while Freelens runs can trigger the host's enable/disable loop ([freelens#1005](https://github.com/freelensapp/freelens/issues/1005)). It settles by itself. Restart the app and the extension is installed.
-- `update-installed.sh` refuses to run while Freelens is up. Quit the app first.
-- The renderer bundle is configured under the **`preload`** key in `electron.vite.config.js`, not `renderer`. The `renderer` key expects an HTML entry. Output must stay CommonJS with `preserveModules`, because Freelens loads `out/main/index.js` and `out/renderer/index.js` directly.
+- This branch targets Freelens 2.x; extension 0.4.0 is the last v1 release. The host globals now live on `globalThis.FreelensExtensionApi`, and React/MobX must match the v2 host.
+- `update-installed.sh` refuses to run while Freelens is up. Quit the app first. It installs an unpacked development copy under the v2 application-data directory, which the host adopts at startup.
+- The renderer bundle is configured under the **`preload`** key in `electron.vite.config.js`, not `renderer`. The `renderer` key expects an HTML entry. Main stays CommonJS (`out/main/index.js`); renderer output must be browser ESM (`out/renderer/index.mjs`) with no Node/Electron requirements. Both use `preserveModules`.
 - `apiManager.getStore(apiBase)` lazily creates a `CustomResourceStore` for CRDs. It is a side effect. Call it from an effect, never during render.
 - The render smoke test in `tests/` imports the built bundle — run `pnpm build` first, or it is skipped.
 - Filtering/export code must stay kind-agnostic (no hard-coded CRD or product names in logic or test fixtures meant as product examples).

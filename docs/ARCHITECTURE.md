@@ -17,7 +17,7 @@
 - `src/renderer/filtering/download-matches.ts` — projects matches to selected fields; serializes a JSON-compatible list as YAML (`yaml`, bundled) or JSON.
 - `src/renderer/discovery/api-discovery.ts` — enumerates kinds from `Renderer.K8sApi.apiManager`.
 - `src/main/index.ts` — activates the durable UI preferences store in the main process.
-- `electron.vite.config.js` + `build/global-externals.js` — renderer entry under the `preload` key; CommonJS + `preserveModules`.
+- `electron.vite.config.js` + `build/global-externals.js` — renderer library build under the `preload` key; CommonJS main, browser ESM renderer, and `preserveModules`.
 
 ## System context
 
@@ -30,7 +30,7 @@ flowchart LR
         NS["namespaceStore<br/>(host)"]
         LS["localStorage<br/>(per cluster frame)"]
     end
-    Page -->|"apis map, getStore()"| AM
+    Page -->|"getApi(predicate), getStore()"| AM
     Page -->|"selected namespaces"| NS
     Page -->|"filters, sets, ui-prefs"| LS
     AM -->|"watch + list"| K8s["Kubernetes API"]
@@ -39,16 +39,18 @@ flowchart LR
 ## Key invariants
 
 - Built-in resource pages are never modified. Freelens exposes no hook to inject filters into built-in lists.
-- Host modules stay external (`@freelensapp/extensions`, `react`, `react-dom`, `mobx`, `mobx-react`, `react-router-dom`) via `build/global-externals.js`.
-- Output stays CommonJS with `preserveModules` (`out/main/index.js`, `out/renderer/index.js`).
+- Host modules stay external (`@freelensapp/extensions`, `react`, `react-dom`, `mobx`, `mobx-react`) via `build/global-externals.js`, which reads `globalThis.FreelensExtensionApi`. The host no longer supplies `react-router-dom`, and this extension does not use it.
+- Main stays CommonJS (`out/main/index.js`); renderer output is ESM (`out/renderer/index.mjs`) with relative imports and no Node/Electron requirements. Both preserve modules. `tsconfig.renderer.json` excludes Node globals and test files.
 - Resource changes resolve the new store before mounting a keyed host list; Freelens subscribes to stores at mount. Pinned columns use path-based sorting IDs and object cells show JSON.
 - Relative-time rows, counts and preview use a shared clock snapshot refreshed every second; a matcher captures its evaluation time.
 - Source compiles under tsc, oxc, and esbuild — no MobX decorators; use `makeObservable` maps.
+- Discovery visits APIs through the public `apiManager.getApi(predicate)` callback and returns false for every entry. This observes the host registry without reading its private `apis` map; duplicates are removed by API version and kind.
 - `apiManager.getStore(apiBase)` lazily creates CRD stores — call only from an effect, never during render.
 - Field catalog comes from live items (sample of 200). Empty items ⇒ empty field dropdown. Resource-version fingerprints are read outside React memoization so MobX in-place, same-length updates invalidate catalog and count snapshots. Rebuild skips unchanged fingerprints.
 - Filter rows: empty field/value disables a row (`exists` / `!exists` ignore value). Fields absent from the sampled catalog are marked but still applied. Sampling only limits suggestions, not matching. Auto-columns require observed scalar values.
 - Combinators: default AND between rows; toggle OR on a row to join it with the previous into an OR-group; groups are ANDed.
 - Namespace scope: Freelens namespace picker drives kubectl `-n` / `-A`, match counts, download, and list filtering (`namespace-scope.ts`).
+- Page-scoped layout styles replace the removed v1 flex utilities.
 - The kind picker element is memoized independently of namespace polling and item updates. Freelens Select recreates its menu on render, so unrelated parent renders must not reset the open menu's scroll.
 - Kind favorites are owned by this extension, separate from Freelens sidebar favorites. They sort before recent and other kinds.
 - yq predicates reduce non-null path values to one boolean per row; existence also excludes empty strings. `!exists` negates existence across the whole path, including wildcard paths.
@@ -72,7 +74,7 @@ sequenceDiagram
     participant FE as filter-engine
 
     U->>P: opens page
-    D->>AM: read apis map (observable)
+    D->>AM: getApi(predicate returning false)
     AM-->>D: all kinds incl. CRDs
     D-->>P: sorted kind list (+ favorites/recent)
     P->>P: restore last kind, filters, ui-prefs

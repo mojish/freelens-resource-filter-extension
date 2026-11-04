@@ -348,7 +348,7 @@ export const ResourceFilterPage = observer(() => {
   );
 
   const renderTableContents = React.useCallback(
-    (object: KubeObject): React.ReactNode[] => [
+    (object: KubeObject) => [
       <button
         key="name"
         type="button"

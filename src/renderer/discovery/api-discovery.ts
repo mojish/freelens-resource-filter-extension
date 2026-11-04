@@ -2,8 +2,7 @@
  * Resource discovery: enumerate all Kubernetes resource kinds registered in the
  * current cluster frame via `Renderer.K8sApi.apiManager`.
  *
- * The ApiManager maintains a MobX observable map `apis` (keyed by apiBase) that
- * merges:
+ * The public getApi(predicate) lookup visits the observable registry, merging:
  *   - built-in apis (pods, deployments, ...)
  *   - CRD apis discovered in the cluster (e.g. `Challenge`)
  *   - apis registered by other extensions
@@ -27,41 +26,30 @@ export interface DiscoveredResource {
   apiResource: string;
 }
 
-type AnyKubeApi = {
-  kind: string;
-  apiBase: string;
-  apiVersionWithGroup: string;
-  isNamespaced?: boolean;
-  apiResource?: string;
-};
-
-type AnyApiManager = {
-  apis: Map<string, AnyKubeApi>;
-  getStore: (apiBase: string) => unknown | undefined;
-};
-
 /** Resolve apiManager lazily — it may not be available at import time. */
-function getApiManager(): AnyApiManager | undefined {
-  return Renderer.K8sApi.apiManager as unknown as AnyApiManager | undefined;
+function getApiManager() {
+  return Renderer.K8sApi.apiManager;
 }
 
 /** All discovered resources, sorted by group then kind. Empty until apiManager is ready. */
 export const discoveredResources = computed<DiscoveredResource[]>(() => {
   const manager = getApiManager();
-  if (!manager || typeof manager.apis?.values !== "function") {
+  if (!manager) {
     return [];
   }
 
   const seen = new Map<string, DiscoveredResource>();
 
-  for (const api of manager.apis.values()) {
+  // Returning false visits every API without accessing the host's private map.
+  // Registry reads remain tracked by MobX as CRDs appear or disappear.
+  manager.getApi((api) => {
     if (!api?.kind || !api?.apiBase) {
-      continue;
+      return false;
     }
 
     const id = `${api.apiVersionWithGroup}/${api.kind}`;
     if (seen.has(id)) {
-      continue;
+      return false;
     }
 
     seen.set(id, {
@@ -72,7 +60,8 @@ export const discoveredResources = computed<DiscoveredResource[]>(() => {
       isNamespaced: api.isNamespaced ?? true,
       apiResource: api.apiResource ?? "",
     });
-  }
+    return false;
+  });
 
   return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
 });

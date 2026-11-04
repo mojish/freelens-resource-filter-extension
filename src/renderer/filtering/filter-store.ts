@@ -14,7 +14,7 @@ export class FilterStore {
 
   constructor(initial?: SerializedFilter[]) {
     makeObservable(this, {
-      filters: observable.deep,
+      filters: observable,
       revision: observable,
       activeFilters: computed,
       hasFilters: computed,

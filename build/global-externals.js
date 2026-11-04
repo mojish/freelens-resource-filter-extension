@@ -1,5 +1,5 @@
 // Vite/Rolldown plugin that maps bare module ids (react, mobx, ...) to runtime
-// globals provided by the Freelens host (global.React, global.Mobx, ...).
+// globals provided by the Freelens host (globalThis.FreelensExtensionApi).
 //
 // This replaces `vite-plugin-external`, whose CommonJS shim
 // (`module.exports = global.React`) only exposes a statically detectable
@@ -121,6 +121,9 @@ function namesFromSource(src) {
 }
 
 function resolveExportNames(id) {
+  // The SDK shim reads the host global at module evaluation, so it cannot be
+  // required in the build process. These are its three public namespaces.
+  if (id === "@freelensapp/extensions") return ["Common", "Main", "Renderer"];
   const entry = resolveEntry(id);
   // Preferred: require the real module and read its keys.
   try {
@@ -139,7 +142,7 @@ function resolveExportNames(id) {
 
 /**
  * @param {Record<string, string>} globals map of module id -> global expression
- *   (e.g. { react: "global.React" }).
+ *   (e.g. { react: "globalThis.FreelensExtensionApi.React" }).
  */
 function globalExternals(globals) {
   const PREFIX = "\0global-external:";

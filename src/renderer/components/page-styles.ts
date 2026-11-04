@@ -3,6 +3,10 @@
 export const pageStyles: Record<string, React.CSSProperties> = {
   container: {
     padding: "0 10px 10px 10px",
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    minHeight: 0,
   },
   pickerRow: {
     margin: "10px 0",
@@ -22,6 +26,12 @@ export const pageStyles: Record<string, React.CSSProperties> = {
 
 /** Minimal stylesheet for the filter bar (Select/inputs inside flex rows). */
 export const rowStyles = `
+/* Freelens 2 removed the v1 flex utilities. Keep our layout scoped to this page. */
+.ResourceFilterPage .flex { display: flex; }
+.ResourceFilterPage .column { flex-direction: column; }
+.ResourceFilterPage .gaps { gap: 8px; }
+.ResourceFilterPage .align-center { align-items: center; }
+.ResourceFilterPage .wrap { flex-wrap: wrap; }
 .ResourceFilterPage .resource-filter-bar {
   padding: 8px;
   margin-bottom: 8px;

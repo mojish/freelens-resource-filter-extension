@@ -8,8 +8,8 @@ A [Freelens](https://freelens.app) extension. It adds one cluster page, **Resour
 
 | Concern | Technology |
 |---|---|
-| UI runtime | Host-provided React 17 and MobX, consumed as globals — never bundled |
-| Bundler | electron-vite with `preserveModules`, CommonJS output |
+| UI runtime | Freelens 2: host-provided React 19, MobX 7, mobx-react 10 via `FreelensExtensionApi` — never bundled |
+| Bundler | electron-vite with `preserveModules`, CommonJS main and ESM renderer output |
 | Package manager | pnpm through corepack |
 
 ## Repository layout
@@ -35,7 +35,7 @@ freelens-resource-filter-extension/
 3. Type-check and build: `pnpm type:check && pnpm build`
 4. Run the tests: `pnpm test`
 5. Pack a tarball: `pnpm pack`
-6. Install into Freelens: quit Freelens, then `./update-installed.sh` (or drag the `*.tgz` onto Extensions). If the enable/disable loop appears, restart Freelens — known host bug.
+6. Install into Freelens 2: quit Freelens, then `./update-installed.sh` for a local development install on Linux, and restart. Alternatively, install the `*.tgz` through Extensions. Version 0.4.0 is the last release for Freelens 1.x.
 7. First code to read: `src/renderer/index.tsx` (registration), `src/renderer/components/resource-filter-page.tsx` (the page), `src/renderer/filtering/filter-engine.ts` (operator + OR-group semantics).
 
 ## Where to find things when lost

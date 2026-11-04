@@ -4,10 +4,10 @@ import ReactDOM from "react-dom";
 import * as Mobx from "mobx";
 import * as MobxReact from "mobx-react";
 import * as JSX from "react/jsx-runtime";
-import { Simulate } from "react-dom/test-utils";
+import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 
-globalThis.global = globalThis;
-Object.assign(globalThis, { React, ReactDom: ReactDOM, ReactJsxRuntime: JSX, Mobx, MobxReact });
+globalThis.FreelensExtensionApi = { React, ReactDom: ReactDOM, ReactJsxRuntime: JSX, Mobx, MobxReact };
 const mounts = [], unmounts = [];
 const makeItem = (name, revision, spec = {}) => ({
   metadata: { name, uid: name, resourceVersion: revision, creationTimestamp: new Date().toISOString() },
@@ -16,7 +16,7 @@ const makeItem = (name, revision, spec = {}) => ({
 });
 const api = (kind) => ({ kind, apiBase: `/apis/example.com/v1/${kind.toLowerCase()}s`, apiVersionWithGroup: "example.com/v1", isNamespaced: true, apiResource: `${kind.toLowerCase()}s` });
 const widget = api("Widget"), gadget = api("Gadget");
-const makeStore = (id) => Mobx.observable({ id, isLoaded: true, items: [makeItem(id, "1", { state: "ready" })] }, { items: Mobx.observable.shallow });
+const makeStore = (id) => Mobx.observable({ id, isLoaded: true, items: [makeItem(id, "1", { state: "ready" })] }, { items: Mobx.observableShallow });
 const stores = { [widget.apiBase]: makeStore("widget"), [gadget.apiBase]: makeStore("gadget") };
 const Layout = MobxReact.observer((props) => {
   React.useEffect(() => { mounts.push(props.store.id); return () => unmounts.push(props.store.id); }, []);
@@ -29,20 +29,32 @@ const Layout = MobxReact.observer((props) => {
 });
 const Select = ({ className, value, options = [], onChange }) => <select className={className} value={value ?? ""} onChange={(event) => onChange({ value: event.target.value })}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
 const Button = ({ label, onClick, disabled, ...props }) => <button data-testid={props["data-testid"]} disabled={disabled} onClick={onClick}>{label}</button>;
-globalThis.LensExtensions = { Renderer: {
+Object.assign(globalThis.FreelensExtensionApi, { Renderer: {
   Component: new Proxy({ Select, Button, KubeObjectListLayout: Layout, WithTooltip: ({ children }) => children }, { get: (target, key) => target[key] ?? (() => null) }),
-  K8sApi: { apiManager: { apis: Mobx.observable.map([[widget.apiBase, widget], [gadget.apiBase, gadget]]), getStore: (base) => stores[base] }, namespaceStore: { areAllSelectedImplicitly: true } },
-} };
+  K8sApi: { apiManager: { getApi: (predicate) => [widget, gadget].find(predicate), getStore: (base) => stores[base] }, namespaceStore: { areAllSelectedImplicitly: true } },
+} });
 localStorage.clear();
 localStorage.setItem("frf:v1:last-kind", "example.com/v1/Widget");
 localStorage.setItem("frf:v1:session:example.com/v1/Widget", JSON.stringify({ outputFields: ["metadata.name"], columns: ["spec.state", "status.state", "spec"], dialect: "jq" }));
 localStorage.setItem("frf:v1:session:example.com/v1/Gadget", JSON.stringify({ outputFields: ["spec"], columns: [], dialect: "yq" }));
-const { ResourceFilterPage } = require("../out/renderer/components/resource-filter-page.js");
-ReactDOM.render(<ResourceFilterPage />, document.getElementById("app"));
+const { ResourceFilterPage } = await import("../out/renderer/components/resource-filter-page.mjs");
+flushSync(() => createRoot(document.getElementById("app")).render(<ResourceFilterPage />));
 const pause = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
 const query = (selector) => document.querySelector(selector);
 const count = () => ({ badge: query('[data-testid="match-count"]')?.textContent, table: query('[data-testid="table-count"]')?.textContent });
 const apply = async (value) => { Simulate.change(query('[data-testid="filter-query-bar"]'), { target: { value } }); Simulate.click(query('[data-testid="apply-query"]')); await pause(); };
+// Exercise real DOM events; React 19 removed react-dom/test-utils.Simulate.
+const Simulate = {
+  change(element, { target: { value } }) {
+    const prototype = element.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    flushSync(() => {
+      Object.getOwnPropertyDescriptor(prototype, "value").set.call(element, value);
+      element.dispatchEvent(new Event(element.tagName === "SELECT" ? "change" : "input", { bubbles: true }));
+    });
+  },
+  click(element) { flushSync(() => element.click()); },
+  focus(element) { flushSync(() => element.focus()); },
+};
 const result = {};
 try {
   await pause(100);

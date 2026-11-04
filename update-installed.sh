@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Safely update the locally-installed copy of freelens-resource-filter-extension.
+# Install/update an unpacked development copy for Freelens 2 on Linux.
 #
 # MUST be run while Freelens is NOT running: the extensions folder
-# (~/.freelens/extensions) is watched by Freelens, and rewriting package.json
-# while the app is up re-triggers the known enable/disable loader loop
-# (https://github.com/freelensapp/freelens/issues/1005).
+# is watched by Freelens. The host adopts this unpacked copy on its next start.
+# Managed tarball installs may instead live in version/digest subdirectories.
 set -euo pipefail
 
-EXT_DIR="${HOME}/.freelens/extensions/freelens-resource-filter-extension"
+USER_DATA_DIR="${FREELENS_USER_DATA_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/Freelens}"
+EXT_DIR="${USER_DATA_DIR}/extensions/freelens-resource-filter-extension"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if pgrep -ix 'freelens([-.][0-9].*)?|freelens\.appimage' >/dev/null 2>&1; then
@@ -15,21 +15,17 @@ if pgrep -ix 'freelens([-.][0-9].*)?|freelens\.appimage' >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -d "$EXT_DIR" ]; then
-  echo "ERROR: installed extension not found at $EXT_DIR" >&2
-  echo "Build a tarball with pnpm verify, then install it from Freelens -> Extensions." >&2
-  exit 1
-fi
-
-for entry in main/index.js renderer/index.js; do
+for entry in main/index.js renderer/index.mjs; do
   if [ ! -s "$REPO_DIR/out/$entry" ]; then
     echo "ERROR: missing build entry out/$entry. Run pnpm verify first." >&2
     exit 1
   fi
 done
 
+mkdir -p "$EXT_DIR"
 rsync -a --delete "$REPO_DIR/out/" "$EXT_DIR/out/"
 cp "$REPO_DIR/package.json" "$EXT_DIR/package.json"
 
 echo "Updated $EXT_DIR to version $(node -p 'require(process.argv[1]).version' "$EXT_DIR/package.json")"
-echo "Now start Freelens, open a cluster, and use the 'Resource Filter' page."
+echo "Now start Freelens 2 and enable Resource Filter in Extensions if needed."
+echo "Freelens will adopt this unpacked copy as a development installation."

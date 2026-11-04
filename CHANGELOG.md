@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-04
+
+### Changed
+- Target Freelens 2.x with its v2 SDK, React 19, MobX 7, and mobx-react 10. Freelens 1.x remains supported by extension 0.4.0.
+- Load host modules through `globalThis.FreelensExtensionApi`; emit browser ESM for the renderer and retain CommonJS for main. Check renderer code without Node globals.
+- Discover built-in and custom resource APIs through the public `apiManager.getApi` callback instead of reading its private registry.
+- Install local development builds under the Freelens 2 application-data directory, including first installs after a host upgrade. Support `FREELENS_USER_DATA_DIR` and Linux `XDG_CONFIG_HOME`.
+
+### Fixed
+- Resolve the Incompatible status after upgrading Freelens to 2.0.0.
+- Preserve nested filter-row reactivity with MobX 7 annotations and page layout after removal of the host's v1 flex utilities.
+
+### Tests
+- Run the renderer smoke tests and real DOM browser regressions with React 19, loading the built ESM files unchanged.
+- Check main-only host globals, browser-safe imports, resource discovery changes, nested row edits, and offline v2 installation without modifying preferences.
+
 ## [0.4.0] — 2026-10-26
 
 ### Added

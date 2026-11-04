@@ -1,7 +1,24 @@
 import { describe, expect, it } from "vitest";
+import { autorun } from "mobx";
 import { FilterStore } from "./filter-store";
 
 describe("FilterStore", () => {
+  it("reacts to nested row edits after restore, add, and replace with MobX 7", () => {
+    const store = new FilterStore([{ field: "spec.state", operator: "=", value: "ready" }]);
+    const values: string[] = [];
+    const dispose = autorun(() => values.push(store.filters.map((row) => row.value).join(",")));
+    try {
+      store.updateFilter(store.filters[0].id, { value: "pending" });
+      store.addFilter("status.phase", "=", "active");
+      store.updateFilter(store.filters[1].id, { value: "idle" });
+      store.setFilters([{ field: "spec.state", operator: "=", value: "new" }]);
+      store.updateFilter(store.filters[0].id, { value: "done" });
+      expect(values).toEqual(["ready", "pending", "pending,active", "pending,idle", "new", "done"]);
+    } finally {
+      dispose();
+    }
+  });
+
   it("adds and tracks active filters", () => {
     const store = new FilterStore();
     store.addFilter("spec.state", "=", "pending");

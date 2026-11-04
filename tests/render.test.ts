@@ -1,6 +1,6 @@
 /**
  * Render smoke test: loads the BUILT renderer bundle the way the Freelens host
- * does (global.LensExtensions, global.Mobx, …) and renders the page.
+ * does (globalThis.FreelensExtensionApi) and renders the page with React 19.
  *
  * Requires `pnpm build` first — the test is skipped when out/ is missing.
  */
@@ -36,7 +36,12 @@ beforeAll(() => {
   const Select = (props: { placeholder?: string }) =>
     React.createElement("span", { className: "SelectStub" }, props.placeholder ?? "");
 
-  vi.stubGlobal("LensExtensions", {
+  vi.stubGlobal("FreelensExtensionApi", {
+    React,
+    ReactDom: require(path.join(NM, "react-dom")),
+    ReactJsxRuntime: require(path.join(NM, "react/jsx-runtime")),
+    Mobx: require(path.join(NM, "mobx")),
+    MobxReact: require(path.join(NM, "mobx-react")),
     Main: { LensExtension: class LensExtension {} },
     Common: {
       Store: {
@@ -83,7 +88,7 @@ beforeAll(() => {
       ),
       K8sApi: {
         apiManager: {
-          apis: new Map([
+          getApi: (predicate: (api: unknown) => boolean) => [
             [
               "/apis/acme.example.com/v1/challenges",
               {
@@ -94,7 +99,7 @@ beforeAll(() => {
                 apiResource: "challenges",
               },
             ],
-          ]),
+          ].map((entry) => entry[1]).find(predicate),
           getStore: () => ({
             isLoaded: false,
             items: [],
@@ -105,17 +110,11 @@ beforeAll(() => {
       },
     },
   });
-  vi.stubGlobal("Mobx", require(path.join(NM, "mobx")));
-  vi.stubGlobal("MobxReact", require(path.join(NM, "mobx-react")));
-  vi.stubGlobal("React", React);
-  vi.stubGlobal("ReactDom", require(path.join(NM, "react-dom")));
-  vi.stubGlobal("ReactRouterDom", {});
-  vi.stubGlobal("ReactJsxRuntime", require(path.join(NM, "react/jsx-runtime")));
 });
 
 describe.skipIf(!existsSync(OUT))("built renderer bundle", () => {
   it("exports the extension class with page and menu registrations", async () => {
-    const mod = await import(path.join(OUT, "index.js"));
+    const mod = await import(path.join(OUT, "index.mjs"));
     expect(typeof mod.default).toBe("function");
     const instance = new mod.default({ manifest: { name: "test", version: "0.0.0" } });
     expect(instance.clusterPages[0].id).toBe("resource-filter");
@@ -124,8 +123,8 @@ describe.skipIf(!existsSync(OUT))("built renderer bundle", () => {
   });
 
   it("renders the page with the filter bar and add-filter button", async () => {
-    const { ResourceFilterPage } = await import(path.join(OUT, "components/resource-filter-page.js"));
-    const React = globalThis.React;
+    const { ResourceFilterPage } = await import(path.join(OUT, "components/resource-filter-page.mjs"));
+    const React = globalThis.FreelensExtensionApi.React;
     const { renderToString } = require(path.join(NM, "react-dom/server"));
     const html = renderToString(React.createElement(ResourceFilterPage));
     expect(html).toContain("Add filter");
@@ -133,17 +132,17 @@ describe.skipIf(!existsSync(OUT))("built renderer bundle", () => {
   });
 
   it("renders the intro hint before a kind is picked", async () => {
-    const { ResourceFilterPage } = await import(path.join(OUT, "components/resource-filter-page.js"));
-    const React = globalThis.React;
+    const { ResourceFilterPage } = await import(path.join(OUT, "components/resource-filter-page.mjs"));
+    const React = globalThis.FreelensExtensionApi.React;
     const { renderToString } = require(path.join(NM, "react-dom/server"));
     const html = renderToString(React.createElement(ResourceFilterPage));
     expect(html).toContain("Pick a resource kind above");
   });
 
   it.each(["yq", "jq"])("downloads the matching format for the %s command dialect", async (dialect) => {
-    const { FilterBar } = await import(path.join(OUT, "components/filter-bar.js"));
-    const { FilterStore } = await import(path.join(OUT, "filtering/filter-store.js"));
-    const { collectFieldPaths } = await import(path.join(OUT, "filtering/field-paths.js"));
+    const { FilterBar } = await import(path.join(OUT, "components/filter-bar.mjs"));
+    const { FilterStore } = await import(path.join(OUT, "filtering/filter-store.mjs"));
+    const { collectFieldPaths } = await import(path.join(OUT, "filtering/field-paths.mjs"));
     const { renderToString } = require(path.join(NM, "react-dom/server"));
     const store = new FilterStore();
     store.addFilter("spec.state", "=", "ready");
@@ -151,7 +150,7 @@ describe.skipIf(!existsSync(OUT))("built renderer bundle", () => {
       { metadata: { name: "alpha" }, spec: { state: "ready" } },
       { metadata: { name: "beta" }, spec: { state: "pending" } },
     ];
-    const html = renderToString(globalThis.React.createElement(FilterBar, {
+    const html = renderToString(globalThis.FreelensExtensionApi.React.createElement(FilterBar, {
       store, catalog: collectFieldPaths(items), listState: "ready", kindId: "example.com/v1/Widget",
       resource: { kind: "Widget", apiResource: "widgets", apiVersionWithGroup: "example.com/v1", isNamespaced: true },
       savedSets: [], outputFields: ["metadata.name"], columns: [], dialect,
@@ -180,8 +179,8 @@ describe.skipIf(!existsSync(OUT))("built renderer bundle", () => {
   });
 
   it("persists one-time migration and does not restore removed favorites from another frame", async () => {
-    const { UiPrefsStore } = await import(path.join(OUT, "src/common/ui-prefs-store.js"));
-    const { hydrateUiPrefsFromStore, toggleFavoriteKind, loadFavoriteKinds, savePreviewOpen, loadPreviewOpen } = await import(path.join(OUT, "filtering/filter-storage.js"));
+    const { UiPrefsStore } = await import(path.join(OUT, "src/common/ui-prefs-store.mjs"));
+    const { hydrateUiPrefsFromStore, toggleFavoriteKind, loadFavoriteKinds, savePreviewOpen, loadPreviewOpen } = await import(path.join(OUT, "filtering/filter-storage.mjs"));
     const local = new Map<string, string>();
     const originalStorage = globalThis.localStorage;
     vi.stubGlobal("localStorage", { getItem: (key: string) => local.get(key) ?? null, setItem: (key: string, value: string) => local.set(key, value) });
@@ -221,7 +220,7 @@ describe("ErrorBoundary", () => {
 
     const boundary = new ErrorBoundary({ children: null });
     boundary.state = { error };
-    const React = globalThis.React ?? require(path.join(NM, "react"));
+    const React = globalThis.FreelensExtensionApi.React ?? require(path.join(NM, "react"));
     // render the fallback output to string through React
     const { renderToString } = require(path.join(NM, "react-dom/server"));
     const html = renderToString(boundary.render() as React.ReactElement);

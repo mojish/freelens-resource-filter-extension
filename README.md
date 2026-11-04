@@ -37,13 +37,17 @@ does not support lookahead, lookbehind, or backreferences; choose jq for those p
 
 ## Installation
 
-Requires Freelens 1.10 or newer. In Freelens, open Extensions (`Ctrl+Shift+E`), search for `freelens-resource-filter-extension`, and install. Or open:
+Version **0.5.0** targets **Freelens 2.x**. Freelens 1.x users should keep version
+0.4.0. The v2 host rejects v1 extensions as **Incompatible**; upgrading requires
+installing the v2 build, not just enabling the old extension.
+
+In Freelens, open Extensions (`Ctrl+Shift+E`) and install a compatible package. For a published release:
 
 ```
 freelens://app/extensions/install/freelens-resource-filter-extension
 ```
 
-You can also download the `.tgz` from [GitHub Releases](https://github.com/mojish/freelens-resource-filter-extension/releases) and install it from the Extensions page. To update a local checkout, run `pnpm verify`, quit Freelens completely, and run `./update-installed.sh`. Details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+You can also install a `.tgz` from [GitHub Releases](https://github.com/mojish/freelens-resource-filter-extension/releases) or a local build through the Extensions page. To build and install this checkout on Linux, run `pnpm verify`, quit Freelens completely, and run `./update-installed.sh`. The helper installs a development copy into the Freelens 2 application-data directory; the host adopts it on the next start. It leaves the old `~/.freelens/extensions` directory untouched. Details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Documentation
 

@@ -12,13 +12,12 @@ const runtimeExternals = ["electron", /^electron\//, ...builtinModules, ...built
 
 // Host-provided modules resolved from globals at runtime — never bundled.
 const hostExternals = {
-  "@freelensapp/extensions": "global.LensExtensions",
-  mobx: "global.Mobx",
-  "mobx-react": "global.MobxReact",
-  react: "global.React",
-  "react-dom": "global.ReactDom",
-  "react-router-dom": "global.ReactRouterDom",
-  "react/jsx-runtime": "global.ReactJsxRuntime",
+  "@freelensapp/extensions": "globalThis.FreelensExtensionApi",
+  mobx: "globalThis.FreelensExtensionApi.Mobx",
+  "mobx-react": "globalThis.FreelensExtensionApi.MobxReact",
+  react: "globalThis.FreelensExtensionApi.React",
+  "react-dom": "globalThis.FreelensExtensionApi.ReactDom",
+  "react/jsx-runtime": "globalThis.FreelensExtensionApi.ReactJsxRuntime",
 };
 
 export default defineConfig({
@@ -27,7 +26,7 @@ export default defineConfig({
     build: {
       lib: {
         entry: resolve(__dirname, "src/main/index.ts"),
-        // Freelens 1.xx extensions are CommonJS modules
+        // Freelens 2 accepts CommonJS in the main process.
         formats: ["cjs"],
       },
       rolldownOptions: {
@@ -44,21 +43,21 @@ export default defineConfig({
     },
     plugins: [react(), globalExternals(hostExternals)],
   },
-  // renderer process in Freelens can use Node.js modules then it is configured
-  // with settings for preload script
+  // Use the library/preload build pipeline; the actual renderer runs in a
+  // browser without Node.js and is loaded as ESM by Freelens 2.
   preload: {
     build: {
       lib: {
         entry: resolve(__dirname, "src/renderer/index.tsx"),
-        // Freelens 1.xx extensions are CommonJS modules
-        formats: ["cjs"],
+        formats: ["es"],
+        fileName: () => "index.mjs",
       },
       outDir: "out/renderer",
       rolldownOptions: {
         external: runtimeExternals,
         output: {
-          // silence warning about using `chunk.default` to access the default export
-          exports: "named",
+          entryFileNames: "[name].mjs",
+          chunkFileNames: "[name].mjs",
           // prefer separate files for each module
           preserveModules: (process.env.VITE_PRESERVE_MODULES ?? "true") === "true",
           preserveModulesRoot: "src/renderer",
